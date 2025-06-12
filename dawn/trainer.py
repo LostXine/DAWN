@@ -152,7 +152,7 @@ class Trainer:
             self.accelerator.log({
                 "val_loss": avg_val_loss,
                 "step": self.cur_step,
-                # "images": images if images is not None else None,
+                "images": images if images is not None else None,
             })
         self.model.train()
         self.progress.remove_task(val_task)
