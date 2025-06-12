@@ -1,0 +1,34 @@
+defaults:
+  - _self_
+  - dataset: calvin_ABC_D
+  - model: TDP
+
+project: DAWN_10act
+
+accelerator:
+  gradient_accumulation_steps: ${trainer.accumulate}
+  mixed_precision: fp16
+  log_with: tensorboard
+
+loader:
+  batch_size: 128
+  num_workers: 4
+
+trainer:
+  accumulate: 1
+  total_steps: 10000
+  log_interval: 20
+  save_interval: 1000
+  val_interval: 1000
+  save_dir: './outputs'
+  resume: false
+  lr_warmup_steps: 500
+  
+
+optimizer:
+  _target_: 'torch.optim.AdamW'
+  lr: 1e-4
+  weight_decay: 0.01
+  betas: [0.9, 0.999]
+
+seed: 42
