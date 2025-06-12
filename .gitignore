@@ -9,7 +9,7 @@ __pycache__/
 
 #
 weights
-data/
+/data/
 wandb
 outputs
 
