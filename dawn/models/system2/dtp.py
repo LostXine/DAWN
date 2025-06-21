@@ -28,14 +28,14 @@ class LatentDiffusionPolicy(nn.Module):
             num_channels=in_channels,
         )
         self.visual_model = transformers.ViTModel(model_config)
-        self.action_enc = nn.Linear(action_dim, latent_dim)
-        self.action_dec = nn.Linear(latent_dim, action_dim)
+        # self.action_enc = nn.Linear(action_dim, latent_dim)
+        # self.action_dec = nn.Linear(latent_dim, action_dim)
 
-        self.denoising_model = LatentTransformerDenoisingModel(
-            num_queries=num_action_steps,
-            latent_dim=latent_dim,
-            num_heads=num_heads, num_layers=num_layers, cond_dim=cond_dim
-        )
+        # self.denoising_model = LatentTransformerDenoisingModel(
+        #     num_queries=num_action_steps,
+        #     latent_dim=latent_dim,
+        #     num_heads=num_heads, num_layers=num_layers, cond_dim=cond_dim
+        # )
 
         self.criterion = torch.nn.functional.mse_loss  # Assuming MSE loss for action classification
     
@@ -48,9 +48,6 @@ class LatentDiffusionPolicy(nn.Module):
             0, self.noise_scheduler.config.num_train_timesteps, (bs,), device=visual_condition.device, dtype=torch.int64
         )
 
-        
-
-
         if labels is not None:
             # If labels are provided, compute the loss
             loss = self.criterion(outputs, labels.flatten(start_dim=1))
@@ -58,3 +55,6 @@ class LatentDiffusionPolicy(nn.Module):
             return_dict["loss"] = loss
 
         return return_dict
+
+if __name__ == "__main__":
+    

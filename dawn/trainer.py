@@ -3,6 +3,7 @@ import logging
 import os
 import torch
 from rich.progress import Progress, SpinnerColumn, BarColumn, MofNCompleteColumn, TextColumn, TimeElapsedColumn, TimeRemainingColumn
+from collections import defaultdict
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +27,12 @@ class Trainer:
         self.save_dir = os.path.join(cfg.save_dir, "checkpoints")
         os.makedirs(self.save_dir, exist_ok=True)
 
+        weights = '/home/nero/Robotics/DAWN/outputs/DAWN_stage_1/2025-06-21_01-47-24/checkpoints/model_0005000.pth'
+        logger.info(self.model.load_state_dict(torch.load(weights, map_location="cpu"), strict=False))
+        # from diffusers import AutoencoderKL
+        # self.model.vae = AutoencoderKL.from_pretrained("madebyollin/sdxl-vae-fp16-fix")
+        # self.model.vae.requires_grad_(False)
+
         # Prepare the model and optimizer with the accelerator
         logger.info(f"Preparing model and optimizer with {self.accelerator.__class__.__name__}.")
         self.model, self.optimizer, self.scheduler, self.train_loader, self.val_loader = self.accelerator.prepare(
@@ -39,7 +46,7 @@ class Trainer:
 
         self.progress = Progress(
             TextColumn("{task.description}"),
-            SpinnerColumn(),
+            # SpinnerColumn(),
             BarColumn(),
             MofNCompleteColumn(),
             TimeElapsedColumn(),
@@ -84,15 +91,17 @@ class Trainer:
             completed=self.cur_step,
         )
 
+        losses = defaultdict(list)
         while self.cur_step < self.cfg.total_steps:
             for batch in self.train_loader:
                 # Forward pass
+                outputs = {}
                 with self.accelerator.accumulate(self.model):
                     outputs = self.model(batch)
 
                     # Compute loss
                     loss = outputs["total_loss"]
-                    
+                        
                     # Backward pass
                     self.accelerator.backward(loss)
 
@@ -100,60 +109,78 @@ class Trainer:
                     self.optimizer.step()
                     self.optimizer.zero_grad()
                     self.scheduler.step()  # Update learning rate
-
                 self.cur_step += 1
                 self.progress.update(train_task, advance=1)
                 
                 # Log 
-                if self.accelerator.is_main_process and self.cur_step % self.cfg.log_interval == 0:
-                    current_lr = self.scheduler.get_last_lr()[0]
-
-                    self.accelerator.log({
-                        "loss": loss.item(),
-                        "step": self.cur_step,
-                        "lr": current_lr,
-                    })
-                    logger.info(f"Step {self.cur_step}, Loss: {loss.item():.7f}, LR: {current_lr:.7f}")
+                if self.accelerator.is_main_process:
+                    # History of losses
+                    for k, v in outputs.items():
+                        if "loss" in k:
+                            losses[k].append(v)
                 
-                # Save checkpoint
-                if self.accelerator.is_main_process and self.cur_step % self.cfg.save_interval == 0:
-                    self.save_checkpoint()
-                    
+                    # Log every log_interval steps
+                    if self.cur_step % self.cfg.log_interval == 0:
+                        current_lr = self.scheduler.get_last_lr()[0]
+                        
+                        dct_loss = {k: sum(v) / len(v) for k, v in losses.items()}
+                        losses = defaultdict(list)  # Reset losses for next logging
+                        loss_string = ", ".join([f"{k}: {v:.7f}" for k, v in dct_loss.items()])
+                        self.accelerator.log({
+                            **dct_loss,
+                            "step": self.cur_step,
+                            "lr": current_lr,
+                        })
+                        logger.info(f"Step {self.cur_step} {loss_string}, LR: {current_lr:.7f}")
+                
+                    # Save checkpoint
+                    if self.cur_step % self.cfg.save_interval == 0:
+                        self.save_checkpoint()
+                        
                 # Validation step
                 if self.cur_step % self.cfg.val_interval == 0:
-                    self.validate()
+                    self.validate(self.train_loader, split="train")
+                    self.validate(self.val_loader, split="val")
 
                 if self.cur_step >= self.cfg.total_steps:
                     break
 
     
-    def validate(self):
+    def validate(self, val_loader, split="val"):
         self.model.eval()
 
         val_task = self.progress.add_task(
             "[bold green]Validating...", 
-            total=len(self.val_loader)
+            # total=len(self.val_loader)
+            total=1,
         )
         
         total_loss = 0.0
+        cnt = 0
+        losses = defaultdict(float)
         with torch.no_grad():
-            for batch in self.val_loader:
+            for batch in val_loader:
                 outputs = self.model(batch)
-                loss = outputs["total_loss"]
-                total_loss += loss.item()
-
+                for k, v in outputs.items():
+                    if "loss" in k:
+                        losses[k] += v.item()
+                cnt += 1
                 self.progress.update(val_task, advance=1)
-                # break 
-        avg_val_loss = total_loss / len(self.val_loader)
+                break 
+        losses = {f"Validation/{split}_{k}" : v / cnt for k, v in losses.items()}
+        loss_string = ", ".join([f"{k}: {v:.7f}" for k, v in losses.items()])
         if self.accelerator.is_main_process:
             images=None
-            images = self.model.module.visualize(batch, outputs)
-            logger.info(f"Validation Loss: {avg_val_loss:.7f}")
+            try:
+                images = self.model.module.visualize(batch, outputs)
+            except:
+                images = self.model.visualize(batch, outputs)
+            logger.info(f"Validation at step {self.cur_step}: {loss_string}")
             self.accelerator.log({
-                "val_loss": avg_val_loss,
+                **losses,
                 "step": self.cur_step,
                 "images": images if images is not None else None,
             })
         self.model.train()
         self.progress.remove_task(val_task)
-        
+    

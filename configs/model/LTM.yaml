@@ -1,0 +1,27 @@
+_target_: dawn.models.arch.LTM.ImagineToAct
+# _target_: dawn.models.system1.raft.RAFT
+
+imagine_model: 
+      _target_: dawn.models.system1.langtomo.MotionEstimation
+      image_size: 128
+      in_channels: 7
+      out_channels: 2
+      condition_dim: 512
+      size: "B"
+      flow_to_rgb: False
+
+action_model: 
+      _target_: dawn.models.system2.vit.ViTAction
+      image_size: 128
+      patch_size: 16
+      in_channels: 5
+      action_space: 7
+      num_actions: 10
+
+      hidden_dim: 192
+      num_layers: 12
+      num_heads: 3
+      mlp_dim: 798
+
+imagine_model_weights: /home/nero/Robotics/DAWN/outputs/checkpoints/model_0145000.pth
+  

@@ -1,6 +1,6 @@
 defaults:
   - _self_
-  - dataset: calvin_debug
+  - dataset: calvin_ABC_D
   - model: LTM
 
 project: DAWN_stage2
@@ -11,7 +11,7 @@ accelerator:
   log_with: wandb
 
 loader:
-  batch_size: 128
+  batch_size: 32
   num_workers: 4
 
 trainer:
@@ -19,15 +19,15 @@ trainer:
   total_steps: 10000
   log_interval: 20
   save_interval: 1000
-  val_interval: 10
-  save_dir: './outputs'
+  val_interval: 500
+  save_dir: './outputs/${project}/${now:%Y-%m-%d_%H-%M-%S}'
   resume: false
   lr_warmup_steps: 500
   
 
 optimizer:
   _target_: 'torch.optim.AdamW'
-  lr: 1e-4
+  lr: 1e-5
   weight_decay: 0.01
   betas: [0.9, 0.999]
 

@@ -20,7 +20,7 @@ class CalvinDataset(Dataset):
     def __init__(self, 
         data_path, 
         split="training", 
-        image_size=128,
+        image_size=256,
         num_frames=2,
         num_actions=10,
         observation_type: List[str] = ["rgb_static", "rgb_gripper"]  # Default observation types
@@ -33,6 +33,8 @@ class CalvinDataset(Dataset):
         self.num_frames = num_frames
         self.num_actions = num_actions
 
+        self.split = split
+
         if not os.path.exists(self.data_path):
             raise ValueError(f"Data path {self.data_path} does not exist.")
 
@@ -42,6 +44,13 @@ class CalvinDataset(Dataset):
         logger.info(f"Loading from {data_path} takes {timer.seconds():.2f} seconds.")
 
     def _get_transform(self):
+        if self.split == "training":
+            return A.Compose([
+                # A.Affine(scale=(0.8, 1.2), rotate=(-10, 10), p=0.5),
+                A.Resize(self.image_size, self.image_size),
+                A.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1, p=0.5),
+                ToTensorV2(),
+            ])
         return A.Compose([
             A.Resize(self.image_size, self.image_size),
             ToTensorV2(),
@@ -68,6 +77,7 @@ class CalvinDataset(Dataset):
     
     def __getitem__(self, idx):
         # idx=0
+        # idx = 0
         episode = self.episodes[idx]
         metadata = episode["metadata"]
         data = {
@@ -91,7 +101,7 @@ class CalvinDataset(Dataset):
         # frame_idx = sorted(random.sample(range(metadata["length"]), k=self.num_frames))  # Randomly sample frame indices
         for obs_type in self.observation_type:
             obs_files = sorted(glob.glob(os.path.join(episode["path"], obs_type, '*.jpg')))
-            data[obs_type] = torch.stack([self.transform(image=imageio.imread(obs_files[idx]))["image"] for idx in frame_idx])
+            data[obs_type] = torch.stack([self.transform(image=imageio.imread(obs_files[idx]))["image"] for idx in frame_idx]) / 255. 
         return data
 
 if __name__ == "__main__":

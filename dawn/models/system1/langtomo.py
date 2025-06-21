@@ -30,9 +30,6 @@ class MotionEstimation(nn.Module):
         self.flow_to_rgb = flow_to_rgb
         self.image_size = image_size
 
-
-        # mean = torch.tensor([123.675, 116.280, 103.530]).view(1, 3, 1, 1)
-        # std = torch.tensor([58.395, 57.120, 57.375]).view(1, 3, 1, 1)
         mean = torch.tensor([0, 0, 0]).view(1, 3, 1, 1)
         std = torch.tensor([255, 255, 255]).view(1, 3, 1, 1)
 
@@ -106,6 +103,8 @@ class MotionEstimation(nn.Module):
 
     @torch.no_grad()
     def gen_flow(self, images):
+        if images.shape[1] < 2:
+            images = torch.cat([images, images], dim=1)  # Duplicate the first frame if only one frame is provided.
         flow_input, _ = self.flow_transform(images, images)
         start_im = einops.rearrange(flow_input[:, :-1], "b t c h w -> (b t) c h w")
         end_im = einops.rearrange(flow_input[:, 1:], "b t c h w -> (b t) c h w")
@@ -212,6 +211,9 @@ class MotionEstimation(nn.Module):
         generated_flow = latents
         outputs = {
             "generated_flow": generated_flow,
+            "gt_flow": gt_rgb_flow,
+            "visual_input": norm_rgb,
+            # "feats": torch.cat([norm_rgb, generated_flow], dim=1),  # Concatenate the RGB and generated flow for visualization
         }
         
         # if batch_data["rgb_static"].shape[1] > 1:
@@ -244,19 +246,19 @@ class MotionEstimation(nn.Module):
         gt_rgb_flow_np = gt_rgb_flow.permute(0, 2, 3, 1).cpu().numpy()
         
         images = []
-        for i in range(images_np.shape[0]):
+        for i in range(min(16, images_np.shape[0])):
             if not self.flow_to_rgb:
                 img = visualize_flow_vectors_as_PIL(images_np[i], None, title="Image")
                 normalizer = FlowNormalizer(self.image_size, self.image_size)
-                gt_flow = normalizer.normalize(gt_rgb_flow_np[i])
+                gt_flow = normalizer.unnormalize(gt_rgb_flow_np[i])
                 gt = visualize_flow_vectors_as_PIL(images_np[i], gt_flow, step=4, title="Ground Truth Optical Flow")
-                pd_flow = normalizer.normalize(generated_flow_np[i])
+                pd_flow = normalizer.unnormalize(generated_flow_np[i])
                 generated = visualize_flow_vectors_as_PIL(images_np[i], pd_flow, step=4, title="Generated Optical Flow")
             else:
                 img = Image.fromarray(images_np[i])
                 gt = Image.fromarray(gt_rgb_flow_np[i])
                 generated = Image.fromarray(generated_flow_np[i])
-
+            
             grid = make_image_grid([img, gt, generated],
                 rows = 1,
                 cols = 3,

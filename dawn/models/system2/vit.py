@@ -21,13 +21,14 @@ class ViTAction(nn.Module):
             num_channels=in_channels,
             num_labels=action_space * num_actions,  # Assuming action space is a vector of size action_space * num_actions
         )
+        self.num_actions = num_actions
         self.model = transformers.ViTForImageClassification(model_config)
         self.criterion = torch.nn.functional.mse_loss  # Assuming MSE loss for action classification
     
     def forward(self, x, labels=None):
         # Forward pass through the ViT model
         outputs = self.model(x).logits
-        return_dict = { "logits": outputs}
+        return_dict = { "logits": outputs.view(outputs.size(0), self.num_actions, -1) }
 
         if labels is not None:
             # If labels are provided, compute the loss
