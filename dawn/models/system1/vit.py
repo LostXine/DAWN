@@ -27,6 +27,7 @@ class ViTAction(nn.Module):
     
     def forward(self, x, labels=None):
         # Forward pass through the ViT model
+        x = x["visual_input"]
         outputs = self.model(x).logits
         return_dict = { "logits": outputs.view(outputs.size(0), self.num_actions, -1) }
 

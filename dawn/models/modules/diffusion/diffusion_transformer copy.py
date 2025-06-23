@@ -31,6 +31,7 @@ class DiffusionTransformer(nn.Module):
         self,
         obs_dim: int,
         goal_dim: int,
+        device: str,
         n_obs_token: int,
         goal_conditioned: bool,
         action_dim: int,
@@ -56,6 +57,7 @@ class DiffusionTransformer(nn.Module):
         use_ada_conditioning: bool = True,
     ):
         super().__init__()
+        self.device = device
         self.goal_conditioned = goal_conditioned
         self.obs_dim = obs_dim
         self.embed_dim = embed_dim
@@ -73,14 +75,14 @@ class DiffusionTransformer(nn.Module):
             seq_size = obs_seq_len * self.n_obs_token + action_seq_len
         print(f"obs dim: {obs_dim}, goal_dim: {goal_dim}, action_dim: {action_dim}, proprio_dim: {proprio_dim}")
         self.tok_emb = nn.Linear(obs_dim, embed_dim)
-        # if use_mlp_goal:
-        #     self.goal_emb = nn.Sequential(
-        #         nn.Linear(goal_dim, embed_dim * 2),
-        #         nn.GELU(),
-        #         nn.Linear(embed_dim * 2, embed_dim)
-        #     )
-        # else:
-        #     self.goal_emb = nn.Linear(goal_dim, embed_dim)
+        if use_mlp_goal:
+            self.goal_emb = nn.Sequential(
+                nn.Linear(goal_dim, embed_dim * 2),
+                nn.GELU(),
+                nn.Linear(embed_dim * 2, embed_dim)
+            )
+        else:
+            self.goal_emb = nn.Linear(goal_dim, embed_dim)
 
         if use_mlp_goal:
             self.lang_emb = nn.Sequential(
@@ -94,10 +96,10 @@ class DiffusionTransformer(nn.Module):
         if not self.goal_conditioned:
             for param in self.lang_emb.parameters():
                 param.requires_grad = False
-        #     for param in self.goal_emb.parameters():
-        #         param.requires_grad = False
+            for param in self.goal_emb.parameters():
+                param.requires_grad = False
 
-        self.pos_emb = None # nn.Parameter(torch.zeros(1, seq_size, embed_dim))
+        self.pos_emb = nn.Parameter(torch.zeros(1, seq_size, embed_dim))
         print('seq_size:',seq_size)
         self.drop = nn.Dropout(embed_pdrob)
         self.proprio_drop = nn.Dropout(0.5)
@@ -138,12 +140,11 @@ class DiffusionTransformer(nn.Module):
         )
 
         self.latent_encoder_emb = None
-        # self.proprio_emb = nn.Sequential(
-        #     nn.Linear(proprio_dim, embed_dim * 2),
-        #     nn.Mish(),
-        #     nn.Linear(embed_dim * 2, embed_dim),
-        # )
-        self.proprio_emb = None
+        self.proprio_emb = nn.Sequential(
+            nn.Linear(proprio_dim, embed_dim * 2),
+            nn.Mish(),
+            nn.Linear(embed_dim * 2, embed_dim),
+        ).to(self.device)
 
         self.block_size = block_size
         self.goal_seq_len = goal_seq_len
@@ -154,7 +155,8 @@ class DiffusionTransformer(nn.Module):
             nn.Linear(embed_dim, embed_dim * 2),
             nn.Mish(),
             nn.Linear(embed_dim * 2, embed_dim),
-        )
+        ).to(self.device)
+
         self.action_emb = nn.Linear(action_dim, embed_dim)
 
         if linear_output:
@@ -172,10 +174,6 @@ class DiffusionTransformer(nn.Module):
         logger.info(
             "number of parameters: %e", sum(p.numel() for p in self.parameters())
         )
-    
-    @property
-    def device(self):
-        return next(self.parameters()).device
 
     def get_block_size(self):
         return self.block_size
@@ -189,8 +187,7 @@ class DiffusionTransformer(nn.Module):
             torch.nn.init.zeros_(module.bias)
             torch.nn.init.ones_(module.weight)
         elif isinstance(module, DiffusionTransformer):
-            pass 
-            # torch.nn.init.normal_(module.pos_emb, mean=0.0, std=0.02)
+            torch.nn.init.normal_(module.pos_emb, mean=0.0, std=0.02)
 
     def forward(self, states, actions, goals, sigma, uncond: Optional[bool] = False):
         context = self.forward_enc_only(states, actions, goals, sigma, uncond)

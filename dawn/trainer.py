@@ -27,11 +27,20 @@ class Trainer:
         self.save_dir = os.path.join(cfg.save_dir, "checkpoints")
         os.makedirs(self.save_dir, exist_ok=True)
 
-        weights = '/home/nero/Robotics/DAWN/outputs/DAWN_stage_1/2025-06-21_01-47-24/checkpoints/model_0005000.pth'
-        logger.info(self.model.load_state_dict(torch.load(weights, map_location="cpu"), strict=False))
-        # from diffusers import AutoencoderKL
-        # self.model.vae = AutoencoderKL.from_pretrained("madebyollin/sdxl-vae-fp16-fix")
-        # self.model.vae.requires_grad_(False)
+        
+        # TODO load weights from a specific path
+        # weights = './outputs/DAWN_stage_2/2025-06-22_19-38-10/checkpoints/model_0028000.pth'
+        # logger.info(self.model.load_state_dict(torch.load(weights, map_location="cpu"), strict=False))
+        
+        # TODO add this vae inside the model
+        from diffusers import AutoencoderKL
+        vae = AutoencoderKL.from_pretrained("madebyollin/sdxl-vae-fp16-fix")
+        try:
+            self.model.imagine_model.vae = vae
+            self.model.imagine_model.vae.requires_grad_(False)
+        except:
+            self.model.vae = vae
+            self.model.vae.requires_grad_(False)
 
         # Prepare the model and optimizer with the accelerator
         logger.info(f"Preparing model and optimizer with {self.accelerator.__class__.__name__}.")
@@ -160,7 +169,7 @@ class Trainer:
         losses = defaultdict(float)
         with torch.no_grad():
             for batch in val_loader:
-                outputs = self.model(batch)
+                outputs = self.model(batch, split=split)
                 for k, v in outputs.items():
                     if "loss" in k:
                         losses[k] += v.item()
@@ -179,7 +188,7 @@ class Trainer:
             self.accelerator.log({
                 **losses,
                 "step": self.cur_step,
-                "images": images if images is not None else None,
+                f"{split}/images": images if images is not None else None,
             })
         self.model.train()
         self.progress.remove_task(val_task)

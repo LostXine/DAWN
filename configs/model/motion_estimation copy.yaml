@@ -1,8 +1,0 @@
-_target_: dawn.models.system1.langtomo.MotionEstimation
-image_size: 128
-in_channels: 9
-out_channels: 3
-condition_dim: 512
-size: "B"
-flow_to_rgb: True
-

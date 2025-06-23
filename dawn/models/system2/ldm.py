@@ -339,16 +339,21 @@ class LatentMotionEstimation(nn.Module):
 
         return outputs
 
-    def visualize(self, batch_data, outputs):
+    def visualize(self, batch_data, outputs, inference=False):
         import wandb
         from diffusers.utils import make_image_grid
         from PIL import Image
         from .flow_utils import visualize_flow_vectors_as_PIL, FlowNormalizer
-        gt_rgb_flow = self.gen_flow(batch_data["rgb_static"])
+        
+        generated_flow = outputs["generated_flow"]
         images = batch_data["rgb_static"][:, 0]
         text = batch_data["language"]
+        
+        if not inference:
+            gt_rgb_flow = self.gen_flow(batch_data["rgb_static"])
+        else:
+            gt_rgb_flow = torch.zeros_like(generated_flow) + 0.5  
 
-        generated_flow = outputs["generated_flow"]
         if self.flow_to_rgb:
             generated_flow = (generated_flow * 255).to(torch.uint8)
             gt_rgb_flow = (gt_rgb_flow * 255).to(torch.uint8)        
@@ -358,6 +363,7 @@ class LatentMotionEstimation(nn.Module):
         generated_flow_np = generated_flow.permute(0, 2, 3, 1).cpu().numpy()
         gt_rgb_flow_np = gt_rgb_flow.permute(0, 2, 3, 1).cpu().numpy()
         
+            
         images = []
         for i in range(min(16, images_np.shape[0])):
             if not self.flow_to_rgb:
@@ -372,14 +378,19 @@ class LatentMotionEstimation(nn.Module):
                 gt = Image.fromarray(gt_rgb_flow_np[i])
                 generated = Image.fromarray(generated_flow_np[i])
             
-            grid = make_image_grid([img, gt, generated],
-                rows = 1,
-                cols = 3,
-            )
-                
-            images.append(
-                wandb.Image(grid, caption=text[i])
-            )
+            if inference:
+                img = np.array(generated.convert("RGB"))
+                images.append(img)
+            else:
+                grid = make_image_grid([img, gt, generated],
+                    rows = 1,
+                    cols = 3,
+                )
+                    
+                images.append(
+                    wandb.Image(grid, caption=text[i])
+                )
+        
         return images
         
 if __name__ == "__main__":

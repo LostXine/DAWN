@@ -1,6 +1,6 @@
 defaults:
   - _self_
-  - model: LTM
+  - model: LTM_VPP
   - task: calvin
   - annotation: validation
   
@@ -12,11 +12,11 @@ accelerator:
 
 seed: 0
 
-weights: /home/nero/Robotics/DAWN/outputs/DAWN_stage2/2025-06-15_23-32-40/checkpoints/model_0007000.pth
+weights: ./outputs/DAWN_stage_2/2025-06-23_01-54-07/checkpoints/model_0077000.pth
 inference:
   save_dir: outputs/inference/${project}/${now:%Y-%m-%d_%H-%M-%S}
   num_sequences: 10
-  dataset: /home/nero/Robotics/DAWN/data/calvin/dataset/calvin_debug_dataset/validation
+  dataset: /home/nero/Robotics/DAWN/data/calvin/dataset/task_ABC_D/validation
   ep_len: 360
-  image_size: 128
+  image_size: 256
 debug: False

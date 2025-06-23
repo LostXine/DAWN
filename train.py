@@ -10,12 +10,9 @@ from diffusers.optimization import get_cosine_schedule_with_warmup
 
 from utils.logging import setup_logging
 from torch import optim
-from rich.progress import Progress, BarColumn, TextColumn, TimeElapsedColumn, TimeRemainingColumn
-from rich.syntax import Syntax
 
 from dawn.trainer import Trainer
 
-# @hydra.main(config_path="configs", config_name="default")
 def main(cfg: DictConfig = None):
     # Initialize the accelerator
     accelerator = accelerate.Accelerator(**cfg.accelerator)
@@ -38,19 +35,27 @@ def main(cfg: DictConfig = None):
     # Init dataloader
     train_loader = DataLoader(
         train_dataset, 
-        batch_size=cfg.loader.batch_size, 
+        batch_size=cfg.loader.train_batch_size, 
         shuffle=True, 
         num_workers=cfg.loader.num_workers
     )
     val_loader = DataLoader(
         val_dataset,
-        batch_size=cfg.loader.batch_size,
+        batch_size=cfg.loader.val_batch_size,
         shuffle=False,
         num_workers=cfg.loader.num_workers
     )
 
     model = hydra.utils.instantiate(cfg.model)
-
+    
+    if cfg.weights is not None:
+        logger.info(f"Loading model weights from {cfg.weights}.")
+        # Load the model weights
+        if os.path.exists(cfg.weights):
+            logger.info(model.load_state_dict(torch.load(cfg.weights, map_location="cpu"), strict=False))
+        else:
+            logger.warning(f"Weights file {cfg.weights} does not exist. Skipping loading weights.")
+        
     # Optimizer
     optimizer = hydra.utils.instantiate(cfg.optimizer, params=model.parameters())
     # Scheduler
@@ -60,7 +65,6 @@ def main(cfg: DictConfig = None):
         num_warmup_steps=(cfg.trainer.lr_warmup_steps * accelerator.num_processes),
         num_training_steps=(cfg.trainer.total_steps * accelerator.num_processes),
     )
-
 
     trainer = Trainer(
         cfg=cfg.trainer,
@@ -76,16 +80,14 @@ def main(cfg: DictConfig = None):
     trainer.train()
 
 if __name__ == "__main__":
-    # cfg = OmegaConf.load("configs/stage1.yaml")  # Load your configuration file
-    # from argparse import ArgumentParser
-    # parser = ArgumentParser(description="Run the training script with Hydra configuration.")
-    # parser.add_argument(
-    #     "--config", type=str,
-    # )
-    # args = parser.parse_args()
-    # config_name = args.config
-
     with hydra.initialize(config_path="configs"):
-        cfg = hydra.compose(config_name="stage1", overrides=sys.argv[2:])
+        argv = sys.argv[1:]
+        print(argv)
+        if len(argv) > 0 and argv[0].startswith("config="):
+            config_name = argv[0].split("=")[1]
+            argv = argv[1:]
+        else:
+            config_name = "default"
+        cfg = hydra.compose(config_name=config_name, overrides=argv)
         OmegaConf.resolve(cfg)
         main(cfg)

@@ -1,34 +1,14 @@
 defaults:
+  - basic_config
   - _self_
-  - dataset: calvin_ABC_D
-  - model: LTM
+  - override dataset: calvin_ABC_D
+  - override model: LTM_VPP
 
-project: DAWN_stage2
-
-accelerator:
-  gradient_accumulation_steps: ${trainer.accumulate}
-  mixed_precision: fp16
-  log_with: wandb
+project: DAWN_stage_2
 
 loader:
-  batch_size: 32
-  num_workers: 4
+  train_batch_size: 64
+  val_batch_size: 16
 
 trainer:
-  accumulate: 1
-  total_steps: 10000
-  log_interval: 20
-  save_interval: 1000
-  val_interval: 500
-  save_dir: './outputs/${project}/${now:%Y-%m-%d_%H-%M-%S}'
-  resume: false
-  lr_warmup_steps: 500
-  
-
-optimizer:
-  _target_: 'torch.optim.AdamW'
-  lr: 1e-5
-  weight_decay: 0.01
-  betas: [0.9, 0.999]
-
-seed: 0
+  total_steps: 100000

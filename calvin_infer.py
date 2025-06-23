@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 def get_video_tag(i):
     # if dist.is_available() and dist.is_initialized():
     #     i = i * dist.get_world_size() + dist.get_rank()
-    return f"_long_horizon/sequence_{i}"
+    return f"sequence_{i}"
 
 def count_success(results):
     count = Counter(results)
@@ -114,31 +114,37 @@ def evaluate_policy(cfg, model, env, accelerator, log_dir):
             logger=logger,
             empty_cache=False,
             log_to_file=True,
-            save_dir=log_dir,
+            save_dir=os.path.join(log_dir, "rollout_videos"),
+            resolution_scale=1,
+        )
+
+    rollout_video2 = RolloutVideo(
+            logger=logger,
+            empty_cache=False,
+            log_to_file=True,
+            save_dir=os.path.join(log_dir, "flow_videos"),
             resolution_scale=1,
         )
 
     record = True
     ###
     for i, (initial_state, eval_sequence) in enumerate(eval_sequences):
-        # result = random.randint(0, 5)
-        # record = i < num_videos
         result = evaluate_sequence(
-            env, model, task_oracle, initial_state, eval_sequence, lang_embeddings, val_annotations, progress, cfg, record, rollout_video, i
+            env, model, task_oracle, initial_state, eval_sequence, lang_embeddings, val_annotations, progress, cfg, record, rollout_video, rollout_video2, i
         )
         results.append(result)
+        
+        success_rates = count_success(results)
+        average_rate = sum(success_rates) / len(success_rates) * 5
+        description = " ".join([f"{i + 1}/5 : {v:.3f}% |" for i, v in enumerate(success_rates)])
+        description += f" Average: {average_rate:.1f} |"    
+        logger.info(description)
+
         if record:
             rollout_video.write_to_tmp()
-        if not cfg.debug:
-            success_rates = count_success(results)
-            average_rate = sum(success_rates) / len(success_rates) * 5
-            description = " ".join([f"{i + 1}/5 : {v:.3f}% |" for i, v in enumerate(success_rates)])
-            description += f" Average: {average_rate:.1f} |"
-            
-            
-            logger.info(description)
-        if record:
-            rollout_video._log_currentvideos_to_file(i, save_as_video=True)
+            rollout_video._log_currentvideos_to_file(i, result, save_as_video=True)
+            rollout_video2.write_to_tmp()
+            rollout_video2._log_currentvideos_to_file(i, result, save_as_video=True)
 
         progress.update(eval_task, advance=1)
 
@@ -146,13 +152,14 @@ def evaluate_policy(cfg, model, env, accelerator, log_dir):
     return results
 
 def evaluate_sequence(
-    env, model, task_checker, initial_state, eval_sequence, lang_embeddings, val_annotations, progress, cfg, record, rollout_video, i
+    env, model, task_checker, initial_state, eval_sequence, lang_embeddings, val_annotations, progress, cfg, record, rollout_video, rollout_video2, i
 ):
     robot_obs, scene_obs = get_env_state_for_initial_condition(initial_state)
     env.reset(robot_obs=robot_obs, scene_obs=scene_obs)
     if record:
         caption = " | ".join(eval_sequence)
         rollout_video.new_video(tag=get_video_tag(i), caption=caption)
+        rollout_video2.new_video(tag=get_video_tag(i), caption=caption)
     success_counter = 0
     if cfg.debug:
         time.sleep(1)
@@ -160,13 +167,15 @@ def evaluate_sequence(
         print()
         print(f"Evaluating sequence: {' -> '.join(eval_sequence)}")
         print("Subtask: ", end="")
-    for subtask in eval_sequence:
+    for idx, subtask in enumerate(eval_sequence):
         if record:
             rollout_video.new_subtask()
+            rollout_video2.new_subtask()
         # success = random.randint(0, 1)
-        success = rollout(env, model, task_checker, cfg, subtask, lang_embeddings, val_annotations, progress, record, rollout_video)
+        success = rollout(env, model, task_checker, cfg, idx, subtask, lang_embeddings, val_annotations, progress, record, rollout_video, rollout_video2)
         if record:
             rollout_video.draw_outcome(success)
+            rollout_video2.draw_outcome(success)
         if success:
             success_counter += 1
         else:
@@ -180,7 +189,7 @@ def get_transform(image_size=128):
         A.Resize(image_size, image_size),
         ToTensorV2(),
     ])
-def rollout(env, model, task_oracle, cfg, subtask, lang_embeddings, val_annotations, progress, record=False, rollout_video=None):
+def rollout(env, model, task_oracle, cfg, idx, subtask, lang_embeddings, val_annotations, progress, record=False, rollout_video=None, rollout_video2=None):
     if cfg.debug:
         print(f"{subtask} ", end="")
         time.sleep(0.5)
@@ -197,17 +206,20 @@ def rollout(env, model, task_oracle, cfg, subtask, lang_embeddings, val_annotati
     transform = get_transform(cfg.inference.image_size)
     device = next(model.parameters()).device
 
-    bar = progress.add_task(f"Rollout {subtask}", total=cfg.inference.ep_len)
+    bar = progress.add_task(f"Rollout {idx}. {subtask}", total=cfg.inference.ep_len)
     for step in range(cfg.inference.ep_len):
         # action = torch.rand(7)
         inputs = {
-            "rgb_static": transform(image=obs["rgb_obs"]["rgb_static"])["image"][None, None, ].to(device),
-            "rgb_gripper": transform(image=obs["rgb_obs"]["rgb_gripper"])["image"][None, None].to(device),
+            "rgb_static": transform(image=obs["rgb_obs"]["rgb_static"])["image"][None, None, ].to(device) / 255. ,
+            "rgb_gripper": transform(image=obs["rgb_obs"]["rgb_gripper"])["image"][None, None].to(device) / 255. ,
             "language": lang_annotation, 
             "language_embedding": torch.tensor(goal).to(device),
         }
-        action = model.step(inputs)
-        logger.info(f"Step {step + 1}: {action}")
+        action_output = model.step(inputs)
+        action = action_output["action"]
+        viz_flow = action_output["viz_flow"]
+        # logger.info(f"Step {step + 1}: {action}")
+        action[:-1] = action[:-1].clamp(-1, 1)  # Clamp action to [-1, 1]
         action[-1] = (action[-1] > 0).long() * 2 - 1
         #print('obs_max:',obs["rgb_obs"]['cond_static'].max())
         #print('obs_shape:', obs["rgb_obs"]['cond_static'].shape)
@@ -219,25 +231,31 @@ def rollout(env, model, task_oracle, cfg, subtask, lang_embeddings, val_annotati
         if record:
             # update video
             rollout_video.update(obs["rgb_obs"]["rgb_static"])
+            rollout_video2.update(viz_flow)
         # check if current step solves a task
         current_task_info = task_oracle.get_task_info_for_set(start_info, current_info, {subtask})
         if len(current_task_info) > 0:
+            model.reset()  # Reset model for next task
             progress.update(bar, advance=cfg.inference.ep_len - step)
+            progress.remove_task(bar)
+
             if cfg.debug:
                 print(colored("success", "green"), end=" ")
             if record:
                 rollout_video.add_language_instruction(lang_annotation)
+                rollout_video2.add_language_instruction(lang_annotation)
             return True
 
         else:
             progress.update(bar, advance=1)
     
     progress.remove_task(bar)
-
+    logger.info(f"Failed to solve task {subtask}:{lang_annotation} in sequence {idx}.")
     if cfg.debug:
         print(colored("fail", "red"), end=" ")
     if record:
         rollout_video.add_language_instruction(lang_annotation)
+        rollout_video2.add_language_instruction(lang_annotation)
     return False
 
 
@@ -261,6 +279,10 @@ def main(cfg):
         logger.info(f"Loading model weights from {cfg.weights}.")
         logger.info(model.load_state_dict(torch.load(cfg.weights, map_location="cpu"), strict=False))
         # model.load_weights()
+        from diffusers import AutoencoderKL
+        vae = AutoencoderKL.from_pretrained("madebyollin/sdxl-vae-fp16-fix")
+        model.imagine_model.vae = vae
+        model.imagine_model.vae.requires_grad_(False)
 
     model = accelerator.prepare(model)
     model.eval()

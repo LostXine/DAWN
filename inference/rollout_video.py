@@ -265,7 +265,7 @@ class RolloutVideo:
             else:
                 clip.write_gif(filename, logger=None)
 
-    def _log_currentvideos_to_file(self, current_step, save_as_video=False):
+    def _log_currentvideos_to_file(self, current_step, results=0, save_as_video=False):
         """
         Mostly taken from WandB
         """
@@ -295,9 +295,9 @@ class RolloutVideo:
 
         tag = tag.replace("/", "_")
         if save_as_video:
-            filename = str(self.save_dir / f"{tag}_{current_step}.mp4")
+            filename = str(self.save_dir / f"{tag}_{current_step}_success={results}.mp4")
         else:
-            filename = self.save_dir / f"{tag}_{current_step}.gif"
+            filename = self.save_dir / f"{tag}_{current_step}_success={results}.gif"
         if save_as_video:
             clip.write_videofile(filename, codec='libx264', bitrate="5000k", logger=None)  # You can adjust the bitrate as needed
         else:

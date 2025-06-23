@@ -65,7 +65,7 @@ def visualize_flow_vectors_as_PIL(image, flow=None, step=16, title="Optical Flow
     """
 
     # Create a matplotlib figure
-    fig = Figure(figsize=(10, 10))
+    fig = Figure(figsize=(4, 4))
     canvas = FigureCanvas(fig)
     ax = fig.add_subplot(111)
 

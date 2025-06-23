@@ -1,4 +1,4 @@
-_target_: dawn.models.system1.ldm.LatentMotionEstimation
+_target_: dawn.models.system2.ldm.LatentMotionEstimation
 flow_to_rgb: False
 # image_size: 256
 # in_channels: 7
