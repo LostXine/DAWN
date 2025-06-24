@@ -2,7 +2,7 @@ import torch
 import logging
 from humanfriendly import format_size
 import random
-
+import os
 logger = logging.getLogger(__name__)
 
 class ImagineToAct(torch.nn.Module):
@@ -33,8 +33,11 @@ class ImagineToAct(torch.nn.Module):
 
     def load_weights(self):
         if self.imagine_model_weights is not None:
-            logger.info(f"Loading imagine model weights from {self.imagine_model_weights}.")
-            logger.info(self.imagine_model.load_state_dict(torch.load(self.imagine_model_weights, map_location="cpu"), strict=False))
+            if not os.path.exists(self.imagine_model_weights):
+                logger.warning(f"Imagine model weights file {self.imagine_model_weights} does not exist. Skipping loading weights.")
+            else:
+                logger.info(f"Loading imagine model weights from {self.imagine_model_weights}.")
+                logger.info(self.imagine_model.load_state_dict(torch.load(self.imagine_model_weights, map_location="cpu"), strict=False))
         
     def forward(self, batch_data, gen_flow=False, split="train"):
         # Imagine  

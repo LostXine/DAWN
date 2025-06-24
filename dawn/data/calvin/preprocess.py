@@ -28,15 +28,18 @@ def process_episode(args_tuple):
                 data[key].append(cur[key].tolist())
         
             for key in keys:
-                img_path = f"{output_path}/episodes/{i}/{key}/{cnt:04d}.jpg"
+                ext = "png" if key.startswith("depth") else "jpg"
+                img_path = f"{output_path}/episodes/{i}/{key}/{cnt:04d}.{ext}"
                 if cnt == 0:
                     os.makedirs(os.path.dirname(img_path), exist_ok=True)
                 
                 # Ensure the image data is in a savable format (e.g., uint8)
                 img_data = cur[key]
+                if ext == "png":
+                    print(key, np.min(img_data), np.max(img_data), img_data.shape, img_path)
                 if img_data.dtype != np.uint8:
                     img_data = img_data.astype(np.uint8)
-                    
+                
                 imageio.imwrite(img_path, img_data)
         except FileNotFoundError:
             # Optional: handle cases where an episode file might be missing
@@ -66,13 +69,13 @@ if __name__ == "__main__":
         print(f"Processing split: {s}")
         path = f"{args.data_path}/{s}"
         output_path = f"{args.output_path}/{s}"
-
+        os.makedirs(f"{output_path}/episodes", exist_ok=True)
         lang_data = np.load(f"{path}/lang_annotations/auto_lang_ann.npy", allow_pickle=True).item()
         
         ep_start_end_ids = lang_data["info"]["indx"]
         lang_ann = lang_data["language"]["ann"]
         
-        keys = [] # ["depth_static", "depth_gripper"] # "rgb_static", "rgb_gripper", 
+        keys = ["rgb_static", "rgb_gripper"] # "depth_static", "depth_gripper", 
         meta_keys = ["actions", "rel_actions"]
         # Prepare a list of arguments for each task
 

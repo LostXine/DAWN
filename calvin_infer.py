@@ -276,8 +276,11 @@ def main(cfg):
     model = hydra.utils.instantiate(cfg.model)
 
     if cfg.weights:
-        logger.info(f"Loading model weights from {cfg.weights}.")
-        logger.info(model.load_state_dict(torch.load(cfg.weights, map_location="cpu"), strict=False))
+        if os.path.exists(cfg.weights):
+            logger.info(f"Loading model weights from {cfg.weights}.")
+            logger.info(model.load_state_dict(torch.load(cfg.weights, map_location="cpu"), strict=False))
+        else:
+            logger.warning(f"Model weights file not found: {cfg.weights}. Skipping loading weights.")
         # model.load_weights()
         from diffusers import AutoencoderKL
         vae = AutoencoderKL.from_pretrained("madebyollin/sdxl-vae-fp16-fix")
