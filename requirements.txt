@@ -1,3 +1,5 @@
+setuptools==57.5.0
+pyhash
 accelerate
 diffusers
 transformers
@@ -18,7 +20,13 @@ tensorboard
 xformers
 tensorflow_hub
 tensorflow
-pyhash
 wandb
 humanfriendly
 peft
+dm-reverb[tensorflow] 
+tensorflow-datasets 
+rlds
+pytorch_lightning
+albumentations
+moviepy==1.0.3
+fvcore

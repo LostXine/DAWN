@@ -9,6 +9,8 @@ imagine_model:
       # condition_dim: 512
       # size: "B"
       flow_to_rgb: False
+      use_cfg: False
+      use_interval: True
 
 action_model: 
       _target_: dawn.models.system1.tdp.TransformerDiffusionPolicy
@@ -18,7 +20,8 @@ action_model:
       goal_dim: 768
       num_latents: 257
 
-imagine_model_weights: /home/nero/Robotics/DAWN/outputs/DAWN_stage_1/2025-06-21_03-19-43/checkpoints/model_0050000.pth
+imagine_model_weights: ./outputs/DAWN_stage_1/2025-06-26_16-41-53/checkpoints/model_0050000.pth
+# outputs/DAWN_stage_1/2025-06-25_13-52-47/checkpoints/model_0050000.pth
 # /home/nero/Robotics/DAWN/outputs/checkpoints/model_0145000.pth
   
 use_flow: True

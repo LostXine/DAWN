@@ -37,25 +37,20 @@ def main(cfg: DictConfig = None):
         train_dataset, 
         batch_size=cfg.loader.train_batch_size, 
         shuffle=True, 
-        num_workers=cfg.loader.num_workers
+        num_workers=cfg.loader.num_workers,
+        pin_memory=True, 
+        
     )
     val_loader = DataLoader(
         val_dataset,
         batch_size=cfg.loader.val_batch_size,
         shuffle=False,
-        num_workers=cfg.loader.num_workers
+        num_workers=cfg.loader.num_workers,
+        pin_memory=True
     )
 
     model = hydra.utils.instantiate(cfg.model)
     
-    if cfg.weights is not None:
-        logger.info(f"Loading model weights from {cfg.weights}.")
-        # Load the model weights
-        if os.path.exists(cfg.weights):
-            logger.info(model.load_state_dict(torch.load(cfg.weights, map_location="cpu"), strict=False))
-        else:
-            logger.warning(f"Weights file {cfg.weights} does not exist. Skipping loading weights.")
-        
     # Optimizer
     optimizer = hydra.utils.instantiate(cfg.optimizer, params=model.parameters())
     # Scheduler
@@ -74,6 +69,7 @@ def main(cfg: DictConfig = None):
         val_loader=val_loader,
         optimizer=optimizer,
         scheduler=lr_scheduler,
+        checkpoint_path=cfg.weights,
     )
 
     # Start training

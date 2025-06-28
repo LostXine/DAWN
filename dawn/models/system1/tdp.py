@@ -138,7 +138,11 @@ class TransformerDiffusionPolicy(nn.Module):
         visual_input = x["visual_input"]
         b, c, h, w = visual_input.shape
         inp = F.interpolate(visual_input, size=(self.feature_extractor.config.image_size, self.feature_extractor.config.image_size), mode='bilinear', align_corners=False)
+        
         visual_feat = self.feature_extractor(inp).last_hidden_state  # [B, C, H, W] -> [B, N, C]
+        
+        visual_feat, gripper_feat = visual_feat.chunk(2)
+        visual_feat = torch.cat([visual_feat, gripper_feat], dim=1)  # [B, N, C] -> [B, 2N, C]
         
         perceptual_emb = {
             'state_images': visual_feat,  # [B, N, C]

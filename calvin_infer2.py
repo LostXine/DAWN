@@ -141,7 +141,7 @@ def evaluate_policy(cfg, model, env, accelerator, log_dir):
         success_rates = count_success(results, seq_len)
         average_rate = sum(success_rates) / len(success_rates) * seq_len
         description = " ".join([f"{i + 1}/{seq_len} : {v:.3f}% |" for i, v in enumerate(success_rates)])
-        description += f" Average: {average_rate:.1f} |"    
+        description += f" Average: {average_rate:.3f} |"    
         logger.info(description)
 
         if record:
@@ -153,7 +153,7 @@ def evaluate_policy(cfg, model, env, accelerator, log_dir):
         progress.update(eval_task, advance=1)
 
     progress.stop()
-    return results, sequences
+    return results
 
 def evaluate_sequence(
     env, model, task_checker, initial_state, eval_sequence, lang_embeddings, val_annotations, progress, cfg, record, rollout_video, rollout_video2, i
@@ -298,8 +298,8 @@ def main(cfg):
 
     env = get_env(cfg.inference.dataset, show_gui=False)
     
-    results, sequences = evaluate_policy(cfg, model, env, accelerator, log_dir=log_dir)
-    print_and_save(results, sequences, cfg, log_dir=log_dir)
+    results = evaluate_policy(cfg, model, env, accelerator, log_dir=log_dir)
+    print_and_save(results, cfg, log_dir=log_dir)
 
 if __name__ == "__main__":
     with hydra.initialize(config_path="configs"):

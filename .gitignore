@@ -11,8 +11,9 @@ __pycache__/
 weights
 /data/
 wandb
-outputs
+outputs*
 
+*.ipynb
 
 # Distribution / packaging
 .Python

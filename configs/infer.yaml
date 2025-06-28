@@ -12,11 +12,16 @@ accelerator:
 
 seed: 0
 
-weights: outputs/DAWN_stage_2/2025-06-23_01-54-07/checkpoints/model_0077000.pth
+weights: ./outputs/DAWN_stage_2/2025-06-27_13-05-21/checkpoints/model_0002000.pth
+# ./outputs_bigcornea/DAWN_stage_2/2025-06-24_01-34-01/checkpoints/model_0100000.pth
+
+save_dir: outputs
 inference:
-  save_dir: outputs/inference/${project}/${now:%Y-%m-%d_%H-%M-%S}
-  num_sequences: 10
-  dataset: data/calvin/datasets/task_ABC_D/validation
+  save_dir: ${save_dir}/${project}/${now:%Y-%m-%d_%H-%M-%S}
+  num_sequences: 100
+  seq_len: 5
+  dataset: data/calvin/dataset/task_ABC_D/validation
   ep_len: 360
   image_size: 256
+  record_rollout_videos: True
 debug: False

@@ -17,10 +17,13 @@ from diffusers import (
     UNet2DConditionModel,
 )
 
+from transformers import CLIPTextModel, CLIPTokenizer
+
 from humanfriendly import format_size
 from peft import LoraConfig, get_peft_model, set_peft_model_state_dict, PeftModel
 
 logger = logging.getLogger(__name__)
+
 
 class LatentMotionEstimation(nn.Module):
     def __init__(self, 
@@ -30,7 +33,11 @@ class LatentMotionEstimation(nn.Module):
             out_channels=3, 
             condition_dim=768, 
             flow_to_rgb=True, 
+            use_cfg: bool = False,
+            guidance_scale: float = 7.5, # Guidance scale for classifier-free guidance
             num_inference_steps=25,
+            use_interval: bool = False, # Whether to use interval embeddings
+            # use_reconstruct_loss: bool = False, # Whether to use reconstruction loss
 
             # LoRA specific parameters
             enable_lora: bool = True,
@@ -47,6 +54,10 @@ class LatentMotionEstimation(nn.Module):
         self.flow_to_rgb = flow_to_rgb
         self.image_size = image_size
         self.num_inference_steps = num_inference_steps
+        self.use_cfg = use_cfg
+        self.guidance_scale = guidance_scale
+        self.use_interval = use_interval
+        # self.use_reconstruct_loss = use_reconstruct_loss
 
         self.enable_lora = enable_lora
         self.lora_weights_path = lora_weights_path
@@ -60,15 +71,24 @@ class LatentMotionEstimation(nn.Module):
             # torch_dtype=torch.float16,
         )
 
-        self.pipeline.set_progress_bar_config(disable=True)
-        self.pipeline.enable_xformers_memory_efficient_attention()
+        # Load scheduler, tokenizer and models.
+        self.noise_scheduler = DDPMScheduler.from_pretrained(pretrained, subfolder="scheduler")
+        self.tokenizer = CLIPTokenizer.from_pretrained(pretrained, subfolder="tokenizer")
+        self.text_encoder = CLIPTextModel.from_pretrained(pretrained, subfolder="text_encoder")
+        self.unet = UNet2DConditionModel.from_pretrained(pretrained, subfolder="unet")
 
-        self.unet = self.pipeline.unet
-        self.vae = self.pipeline.vae
+        # self.vae = AutoencoderKL.from_pretrained(pretrained, subfolder="vae")
+        self.vae = AutoencoderKL.from_pretrained("madebyollin/sdxl-vae-fp16-fix")
+        
+        # self.pipeline.set_progress_bar_config(disable=True)
+        # self.pipeline.enable_xformers_memory_efficient_attention()
+
+        # self.unet = self.pipeline.unet
+        # self.vae = self.pipeline.vae
         # self.pipeline.vae = self.vae
 
-        self.tokenizer = self.pipeline.tokenizer
-        self.text_encoder = self.pipeline.text_encoder
+        # self.tokenizer = self.pipeline.tokenizer
+        # self.text_encoder = self.pipeline.text_encoder
         self.unet.conv_in = nn.Conv2d(
             in_channels, self.unet.conv_in.out_channels, kernel_size=self.unet.conv_in.kernel_size, stride=self.unet.conv_in.stride, padding=self.unet.conv_in.padding
         )
@@ -78,28 +98,6 @@ class LatentMotionEstimation(nn.Module):
         self.vae.requires_grad_(False)
         self.flow_model.requires_grad_(False)
 
-
-        # self.tokenizer = CLIPTokenizer.from_pretrained(
-        #     pretrained, subfolder="tokenizer")
-        # self.text_encoder = CLIPTextModel.from_pretrained(
-        #     pretrained, subfolder="text_encoder")
-        # self.vae = AutoencoderKL.from_pretrained(
-        #     pretrained, subfolder="vae")
-        # self.unet = UNet2DConditionModel.from_pretrained(
-        #     pretrained, subfolder="unet")
-
-        # self.pipeline = StableDiffusionInstructPix2PixPipeline.from_pretrained(
-        #     # pretrained,
-        #     "stable-diffusion-v1-5/stable-diffusion-v1-5",
-        #     unet = self.unet,
-        #     text_encoder=self.text_encoder,
-        #     vae=self.vae,
-        #     tokenizer=self.tokenizer,
-        #     safety_checker=None,
-        #     requires_safety_checker=False,
-        #     # attn_implementation="flash_attention_2",
-        #     # torch_dtype=torch.float16,
-        # )
         self.enable_lora=False
         if self.enable_lora:
             # Configure LoRA for the UNet
@@ -140,6 +138,9 @@ class LatentMotionEstimation(nn.Module):
         self.noise_scheduler.set_timesteps(self.num_inference_steps)  # Set the number of inference steps
         self.generator = torch.Generator(device=self.device).manual_seed(0)
 
+        if self.use_interval:
+            self.interval_embed = nn.Embedding(31, condition_dim)
+
 
         total_params = sum(p.numel() for p in self.parameters())
         total_trainable_params = sum(p.numel() for p in self.parameters() if p.requires_grad)
@@ -171,6 +172,13 @@ class LatentMotionEstimation(nn.Module):
     @property
     def device(self):
         return next(self.parameters()).device
+    
+    def uncond_text(self):
+        try:
+            return self.uncond_text_embed
+        except:
+            self.uncond_text_embed = self.encode_text([""])
+            return self.uncond_text_embed
 
     @torch.no_grad()
     def encode_text(self, text):
@@ -181,7 +189,7 @@ class LatentMotionEstimation(nn.Module):
         # exit(0)
         return text_condition
 
-    def forward(self, batch_data):
+    def forward(self, batch_data, **kwargs):
         """
         """
         if not self.training:
@@ -207,11 +215,21 @@ class LatentMotionEstimation(nn.Module):
         image_latents = image_latents * self.vae.config.scaling_factor  # Scale the latents
         
         text = batch_data["language"]
-        # random_p = torch.rand(bsz, device=latents.device)
-        # prompt_mask = (random_p < 0.1).reshape(bsz, 1, 1)
-        # text = [text[i] if prompt_mask[i] else "" for i in range(bsz)]
-        text_condition = self.encode_text(text)
+        if self.use_cfg:
+            random_p = torch.rand(bsz, device=latents.device)
+            prompt_mask = (random_p < 0.1).reshape(bsz, 1, 1)
+            text = [text[i] if not prompt_mask[i] else "" for i in range(bsz)]
 
+        text_condition = self.encode_text(text)
+        
+        if self.use_interval:
+            interval_embed = self.interval_embed(batch_data["skip_frame"]).unsqueeze(1)  # Shape: (bsz, 1, condition_dim)
+            text_condition = torch.cat([interval_embed, text_condition], dim=1)  # Concatenate along the sequence length dimension
+        # if self.use_cfg:
+        #     random_p = torch.rand(bsz, device=latents.device)
+        #     prompt_mask = (random_p < 0.1).view(-1, 1, 1)
+        #     unconditional_text_embeddings = self.uncond_text.unsqueeze(0).repeat(bsz, 1, 1)
+        #     text_condition = 
         # logger.info(f"Text condition shape: {text_condition.shape}, Image latents shape: {image_latents.shape}, Latents shape: {latents.shape}")
         
         # Prepare noise
@@ -230,26 +248,38 @@ class LatentMotionEstimation(nn.Module):
         
         loss = F.mse_loss(noise_pred, noise)
 
-        # Decode back to image
-        # alpha_prod_t = self.noise_scheduler.alphas_cumprod[timesteps].view(-1, 1, 1, 1)
-        # sqrt_alpha_prod_t = alpha_prod_t.sqrt()
-        # sqrt_one_minus_alpha_prod_t = (1.0 - alpha_prod_t).sqrt()
-        # generated_latents = (noisy_latent - sqrt_one_minus_alpha_prod_t * noise_pred) / sqrt_alpha_prod_t
-        
-        # generated_latents = generated_latents / self.vae.config.scaling_factor  # Scale back the latents
-        # generated_flow = self.vae.decode(generated_latents).sample
-        # generated_flow = (generated_flow / 2 + 0.5).clamp(0, 1)  # Scale back to [0, 1]
+        outputs = { "diffu_loss": loss }
 
-        # recon_loss = F.mse_loss(generated_flow, gt_rgb_flow)
+        # if self.use_reconstruct_loss:
+        #     model_output = noise_pred
+        #     sample = noisy_latent
+        #     alpha_prod_t = self.noise_scheduler.alphas_cumprod[timesteps].view(-1, 1, 1, 1)
+        #     beta_prod_t = 1 - alpha_prod_t
+        #     pred_original_sample = (sample - beta_prod_t ** (0.5) * model_output) / alpha_prod_t ** (0.5)
+                
+        #     # 4. Clip or threshold "predicted x_0"
+        #     if self.noise_scheduler.config.clip_sample:
+        #         pred_original_sample = pred_original_sample.clamp(
+        #             -self.noise_scheduler.config.clip_sample_range, self.noise_scheduler.config.clip_sample_range
+        #         )
 
-        outputs = {
-            # "diffu_loss": loss,
-            # "recon_loss": recon_loss,
-            "total_loss": loss,
-        }
+        #     pred_latent = pred_original_sample
+
+            # pred_latent = self.noise_scheduler.step(
+            #     noise_pred, # model_output
+            #     timesteps,  # timestep
+            #     noisy_latent, # sample
+            # ).pred_original_sample
+            
+            # recon_flow = self.vae.decode(pred_latent / self.vae.config.scaling_factor).sample
+            # recon_flow = (recon_flow / 2 + 0.5).clamp(0, 1)  # Scale back to [0, 1]
+            # recon_loss = F.mse_loss(recon_flow, gt_rgb_flow)
+            # outputs["recon_loss"] = recon_loss * 5
+
+        outputs["total_loss"] = sum([v for k, v in outputs.items() if "loss" in k])
 
         return outputs
-
+   
     def forward_eval(self, batch_data):
 
         # Prepare ground truth flow
@@ -273,16 +303,34 @@ class LatentMotionEstimation(nn.Module):
         text = batch_data["language"]
         text_condition = self.encode_text(text)
 
+        if self.use_interval:
+            interval_embed = self.interval_embed(batch_data["skip_frame"]).unsqueeze(1)
+            text_condition = torch.cat([interval_embed, text_condition], dim=1)  # Concatenate along the sequence length dimension
+
+        if self.use_cfg:
+            unconditional_text_embeddings = self.encode_text([""]).repeat(image_latents.shape[0], 1, 1)
+            if self.use_interval:
+                unconditional_text_embeddings = torch.cat([interval_embed, unconditional_text_embeddings], dim=1)
+            text_condition = torch.cat([unconditional_text_embeddings, text_condition])
         # 
+
         latents = torch.randn(image_latents.shape, device=image_latents.device)
         # Iterate through DDIM timesteps
         for t in self.noise_scheduler.timesteps:
             # Prepare the model inputs
-            with torch.no_grad():
-                # Predict the noise (epsilon) using the model
-                model_input = torch.concat([latents, image_latents], dim=1)
-                time_step = torch.ones(latents.shape[0], dtype=torch.int64, device=latents.device) * t
-                predicted_noise = self.unet(model_input, time_step, text_condition, return_dict=False)[0]
+            model_input = torch.concat([latents, image_latents], dim=1)
+            
+            if self.use_cfg:
+                model_input = torch.cat([model_input] * 2)
+
+            time_step = torch.ones(model_input.shape[0], dtype=torch.int64, device=latents.device) * t
+            predicted_noise = self.unet(model_input, time_step, text_condition, return_dict=False)[0]
+
+            if self.use_cfg:
+                noise_pred_uncond, noise_pred_text = predicted_noise.chunk(2)
+                # Apply Classifier-Free Guidance formula
+                # This blends the predictions based on the guidance_scale
+                predicted_noise = noise_pred_uncond + self.guidance_scale * (noise_pred_text - noise_pred_uncond)
 
             # Update the latent based on DDIM step
             latents = self.noise_scheduler.step(predicted_noise, t, latents).prev_sample
@@ -347,6 +395,7 @@ class LatentMotionEstimation(nn.Module):
         
         generated_flow = outputs["generated_flow"]
         images = batch_data["rgb_static"][:, 0]
+        goals = batch_data["rgb_static"][:, -1]
         text = batch_data["language"]
         
         if not inference:
@@ -358,8 +407,10 @@ class LatentMotionEstimation(nn.Module):
             generated_flow = (generated_flow * 255).to(torch.uint8)
             gt_rgb_flow = (gt_rgb_flow * 255).to(torch.uint8)        
     
+        loss = ((gt_rgb_flow - generated_flow) ** 2).mean(dim=[1, 2, 3]) * 1000
         # Convert to numpy for visualization
         images_np = (images.permute(0, 2, 3, 1).cpu().numpy() * 255).astype(np.uint8)
+        goals_np = (goals.permute(0, 2, 3, 1).cpu().numpy() * 255).astype(np.uint8)
         generated_flow_np = generated_flow.permute(0, 2, 3, 1).cpu().numpy()
         gt_rgb_flow_np = gt_rgb_flow.permute(0, 2, 3, 1).cpu().numpy()
         
@@ -367,7 +418,10 @@ class LatentMotionEstimation(nn.Module):
         images = []
         for i in range(min(16, images_np.shape[0])):
             if not self.flow_to_rgb:
-                img = visualize_flow_vectors_as_PIL(images_np[i], None, title="Image")
+                img = visualize_flow_vectors_as_PIL(images_np[i], None, title=text[i])
+                goal = visualize_flow_vectors_as_PIL(goals_np[i], None, 
+                    title=f"Interval = {batch_data['skip_frame'][i]}, Loss x 1K = {loss[i].item():.4f}"
+                )
                 normalizer = FlowNormalizer(self.image_size, self.image_size)
                 gt_flow = normalizer.unnormalize(gt_rgb_flow_np[i])
                 gt = visualize_flow_vectors_as_PIL(images_np[i], gt_flow, step=4, title="Ground Truth Optical Flow")
@@ -375,6 +429,7 @@ class LatentMotionEstimation(nn.Module):
                 generated = visualize_flow_vectors_as_PIL(images_np[i], pd_flow, step=4, title="Generated Optical Flow")
             else:
                 img = Image.fromarray(images_np[i])
+                goal = Image.fromarray(goals_np[i])
                 gt = Image.fromarray(gt_rgb_flow_np[i])
                 generated = Image.fromarray(generated_flow_np[i])
             
@@ -382,9 +437,9 @@ class LatentMotionEstimation(nn.Module):
                 img = np.array(generated.convert("RGB"))
                 images.append(img)
             else:
-                grid = make_image_grid([img, gt, generated],
-                    rows = 1,
-                    cols = 3,
+                grid = make_image_grid([img, goal, gt, generated],
+                    rows = 2,
+                    cols = 2,
                 )
                     
                 images.append(

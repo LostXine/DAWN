@@ -4,7 +4,8 @@ import os
 import torch
 from rich.progress import Progress, SpinnerColumn, BarColumn, MofNCompleteColumn, TextColumn, TimeElapsedColumn, TimeRemainingColumn
 from collections import defaultdict
-
+import time
+                    
 logger = logging.getLogger(__name__)
 
 class Trainer:
@@ -16,6 +17,7 @@ class Trainer:
         train_loader, 
         val_loader,
         scheduler,
+        checkpoint_path: str = None
     ):
         self.cfg = cfg
         self.accelerator = accelerator
@@ -27,21 +29,9 @@ class Trainer:
         self.save_dir = os.path.join(cfg.save_dir, "checkpoints")
         os.makedirs(self.save_dir, exist_ok=True)
 
-        
-        # TODO load weights from a specific path
-        # weights = './outputs/DAWN_stage_2/2025-06-22_19-38-10/checkpoints/model_0028000.pth'
-        # logger.info(self.model.load_state_dict(torch.load(weights, map_location="cpu"), strict=False))
-        
-        # TODO add this vae inside the model
-        from diffusers import AutoencoderKL
-        vae = AutoencoderKL.from_pretrained("madebyollin/sdxl-vae-fp16-fix")
-        try:
-            self.model.imagine_model.vae = vae
-            self.model.imagine_model.vae.requires_grad_(False)
-        except:
-            self.model.vae = vae
-            self.model.vae.requires_grad_(False)
-
+        self.load_checkpoint(checkpoint_path)
+        # self.model.load_weights()
+    
         # Prepare the model and optimizer with the accelerator
         logger.info(f"Preparing model and optimizer with {self.accelerator.__class__.__name__}.")
         self.model, self.optimizer, self.scheduler, self.train_loader, self.val_loader = self.accelerator.prepare(
@@ -55,7 +45,7 @@ class Trainer:
 
         self.progress = Progress(
             TextColumn("{task.description}"),
-            # SpinnerColumn(),
+            SpinnerColumn(),
             BarColumn(),
             MofNCompleteColumn(),
             TimeElapsedColumn(),
@@ -63,13 +53,24 @@ class Trainer:
             disable=not self.accelerator.is_main_process,
         ) 
         self.progress.start()
+
     def load_checkpoint(self, checkpoint_path):
         """
         Load a model checkpoint.
         Args:
             checkpoint_path (str): Path to the checkpoint file.
         """
-        self.accelerator.load_state(checkpoint_path, self.model, self.optimizer)
+        if checkpoint_path is not None:
+            logger.info(f"Loading model weights from {checkpoint_path}.")
+            if os.path.exists(checkpoint_path):
+                logger.info(self.model.load_state_dict(torch.load(checkpoint_path, map_location="cpu"), strict=False))
+            else:
+                logger.warning(f"Weights file {checkpoint_path} does not exist. Skipping loading weights.")
+        
+            # Extract step number from the filename
+            # if self.cfg.resume:
+            #     self.cur_step = int(os.path.basename(checkpoint_path).split('_')[1].split('.')[0])
+            #     logger.info(f"Resuming training from step {self.cur_step}")
 
     def save_checkpoint(self, k=5):
         """
@@ -101,12 +102,19 @@ class Trainer:
         )
 
         losses = defaultdict(list)
+        data_time = time.time()
+
         while self.cur_step < self.cfg.total_steps:
             for batch in self.train_loader:
+                losses["data_time"].append(time.time() - data_time)
+
                 # Forward pass
                 outputs = {}
                 with self.accelerator.accumulate(self.model):
+                    start_time = time.time()
                     outputs = self.model(batch)
+                    training_time = time.time() - start_time
+                    losses["time"].append(training_time)
 
                     # Compute loss
                     loss = outputs["total_loss"]
@@ -139,7 +147,8 @@ class Trainer:
                             **dct_loss,
                             "step": self.cur_step,
                             "lr": current_lr,
-                        })
+                        }, step=self.cur_step
+                        )
                         logger.info(f"Step {self.cur_step} {loss_string}, LR: {current_lr:.7f}")
                 
                     # Save checkpoint
@@ -148,48 +157,64 @@ class Trainer:
                         
                 # Validation step
                 if self.cur_step % self.cfg.val_interval == 0:
-                    self.validate(self.train_loader, split="train")
+                    self.validate(self.train_loader, split="train", num_steps=1)
                     self.validate(self.val_loader, split="val")
 
                 if self.cur_step >= self.cfg.total_steps:
                     break
 
+                data_time = time.time()
+
     
-    def validate(self, val_loader, split="val"):
+    def validate(self, val_loader, split="val", num_steps=-1):
         self.model.eval()
 
+        if num_steps <= 0:
+            num_steps = len(val_loader)
+
         val_task = self.progress.add_task(
-            "[bold green]Validating...", 
-            # total=len(self.val_loader)
-            total=1,
+            "[bold green]Validating...",
+            total=num_steps,
         )
         
         total_loss = 0.0
         cnt = 0
         losses = defaultdict(float)
+
         with torch.no_grad():
-            for batch in val_loader:
+            for i, batch in enumerate(val_loader):
                 outputs = self.model(batch, split=split)
                 for k, v in outputs.items():
                     if "loss" in k:
                         losses[k] += v.item()
                 cnt += 1
                 self.progress.update(val_task, advance=1)
-                break 
+
+                # Log images
+                if self.accelerator.is_main_process and i == 0:
+                    images=None
+                    try:
+                        images = self.model.module.visualize(batch, outputs)
+                    except:
+                        images = self.model.visualize(batch, outputs)
+                    
+                    if images is not None:
+                        self.accelerator.log({
+                                f"{split}/{i}": images,
+                            }, step = self.cur_step
+                        )
+                if cnt == num_steps:
+                    break 
+        
         losses = {f"Validation/{split}_{k}" : v / cnt for k, v in losses.items()}
         loss_string = ", ".join([f"{k}: {v:.7f}" for k, v in losses.items()])
+        logger.info(f"Validation at step {self.cur_step}: {loss_string}")
         if self.accelerator.is_main_process:
-            images=None
-            try:
-                images = self.model.module.visualize(batch, outputs)
-            except:
-                images = self.model.visualize(batch, outputs)
-            logger.info(f"Validation at step {self.cur_step}: {loss_string}")
             self.accelerator.log({
                 **losses,
                 "step": self.cur_step,
-                f"{split}/images": images if images is not None else None,
-            })
+            }, step = self.cur_step)
+
         self.model.train()
         self.progress.remove_task(val_task)
     

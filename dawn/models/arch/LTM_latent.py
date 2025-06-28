@@ -39,7 +39,7 @@ class ImagineToAct(torch.nn.Module):
                 logger.info(f"Loading imagine model weights from {self.imagine_model_weights}.")
                 logger.info(self.imagine_model.load_state_dict(torch.load(self.imagine_model_weights, map_location="cpu"), strict=False))
         
-    def forward(self, batch_data, gen_flow=False, split="train"):
+    def forward(self, batch_data, gen_flow=True, split="train"):
         # Imagine  
         imagined_output = None
         with torch.no_grad():
@@ -65,6 +65,12 @@ class ImagineToAct(torch.nn.Module):
                 norm_rgb,
                 norm_flow
             ], dim=1)
+
+            visual_input2 = torch.cat([
+                batch_data["rgb_gripper"][:, 0], 
+                torch.zeros_like(norm_flow, device=norm_flow.device)
+            ], dim=1)
+            visual_input = torch.cat([visual_input, visual_input2], dim=0)
             goal = self.imagine_model.encode_text(batch_data["language"])
 
             x = {

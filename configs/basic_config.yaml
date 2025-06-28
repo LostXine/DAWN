@@ -6,7 +6,7 @@ defaults:
 weights: null
 
 project: DAWN
-
+desc: None
 debug: false
 
 accelerator:
@@ -20,15 +20,17 @@ loader:
   val_batch_size: 16
   num_workers: 4
 
+save_dir: ./outputs
+
 trainer:
   accumulate: 1
   total_steps: 50000
   log_interval: 20
   save_interval: 1000
   val_interval: 500
-  save_dir: './outputs/${project}/${now:%Y-%m-%d_%H-%M-%S}'
+  save_dir: '${save_dir}/${project}/${now:%Y-%m-%d_%H-%M-%S}'
   resume: false
-  lr_warmup_steps: 100
+  lr_warmup_steps: 500
   
 optimizer:
   _target_: 'torch.optim.AdamW'

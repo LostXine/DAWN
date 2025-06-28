@@ -9,9 +9,20 @@ from operator import add
 
 import numpy as np
 
-from inference.utils_infer import temp_seed
+# from inference.utils_infer import temp_seed
+import contextlib
 
 logger = logging.getLogger(__name__)
+
+
+@contextlib.contextmanager
+def temp_seed(seed):
+    state = np.random.get_state()
+    np.random.seed(seed)
+    try:
+        yield
+    finally:
+        np.random.set_state(state)
 
 
 task_categories = {
@@ -289,10 +300,9 @@ def valid_task(curr_state, task):
     return next_states
 
 
-def get_sequences_for_state(state, num_sequences=None):
+def get_sequences_for_state(state, num_sequences=None, seq_len=5):
     state = deepcopy(state)
 
-    seq_len = 5
     valid_seqs = [[] for x in range(seq_len)]
     with temp_seed(0):
         for step in range(seq_len):
@@ -332,9 +342,8 @@ def check_sequence(state, seq):
 
 
 def get_sequences_for_state2(args):
-    state, num_sequences, i = args
+    state, num_sequences, i, seq_len = args
     np.random.seed(i)
-    seq_len = 5
     results = []
 
     while len(results) < num_sequences:
@@ -349,7 +358,7 @@ def flatten(t):
 
 
 @functools.lru_cache
-def get_sequences(num_sequences=1000, num_workers=None):
+def get_sequences(num_sequences=1000, num_workers=None, seq_len=5):
     possible_conditions = {
         "led": [0, 1],
         "lightbulb": [0, 1],
@@ -372,7 +381,13 @@ def get_sequences(num_sequences=1000, num_workers=None):
         with ProcessPoolExecutor(max_workers=num_workers) as executor:
             results = flatten(
                 executor.map(
-                    get_sequences_for_state2, zip(initial_states, num_sequences_per_state, range(len(initial_states)))
+                    get_sequences_for_state2, 
+                    zip(
+                        initial_states, 
+                        num_sequences_per_state, 
+                        range(len(initial_states)), 
+                        [seq_len] * len(initial_states)
+                    )
                 )
             )
         results = list(zip(np.repeat(initial_states, num_sequences_per_state), results))
@@ -383,8 +398,12 @@ def get_sequences(num_sequences=1000, num_workers=None):
 
 
 if __name__ == "__main__":
-    results = get_sequences(1000)
-    counters = [Counter() for _ in range(5)]  # type: ignore
+    seq_len = 5
+    results = get_sequences(100, seq_len=seq_len)
+    for i, (initial_state, seq) in enumerate(results):
+        # print(f"Initial state: {initial_state}")
+        print(f"{i}. Sequence: {seq}")
+    counters = [Counter() for _ in range(seq_len)]  # type: ignore
     for initial_state, seq in results:
         for i, task in enumerate(seq):
             counters[i][task] += 1
@@ -401,3 +420,23 @@ if __name__ == "__main__":
     all_counters = functools.reduce(add, counters)
     for task, freq in sorted(all_counters.items(), key=lambda x: x[1], reverse=True):
         print(f"{task}: {freq / sum(all_counters.values()) * 100:.2f}")
+
+    # from copy import deepcopy
+    # succ = deepcopy(counters[0])
+    # lst = open("/home/nero/temp.py","r").readlines()
+    # lst = [x.split(":")[0] for x in lst]
+    # for x in lst:
+    #     succ[x] -= 1 
+    # print(*["-"] * 20)
+    # final = []
+
+    # total = 0
+    # for k, v in succ.items():
+    #     final.append((succ[k] / counters[0][k] * 100, k, v, counters[0][k]))
+    #     total += v
+    # final = sorted(final, key=lambda x: x[0], reverse=True)
+    # for i, x in enumerate(final):
+    #     print(f"ID: {i} - Success: {x[0]:.2f}%, Task: {x[1]}, Count: {x[2]}, Total: {x[3]}")
+    # print(total)
+    # print("succ:", succ)
+    # print(lst)
