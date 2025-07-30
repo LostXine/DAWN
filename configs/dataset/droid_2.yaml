@@ -1,0 +1,12 @@
+train:  
+  _target_: dawn.data.droid.droid.DroidDataset
+  data_path: data/droid_2/training
+  num_frames: 3
+  split: training 
+
+val:
+  _target_: dawn.data.droid.droid.DroidDataset
+  data_path: data/droid_100_2
+  num_frames: 3
+  split: validation
+

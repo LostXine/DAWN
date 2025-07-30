@@ -226,6 +226,8 @@ class DiffusionTransformer(nn.Module):
         return emb_t
 
     def preprocess_goals(self, goals, states_length, uncond=False):
+        if goals is None:
+            return goals
         if len(goals.shape) == 2:
             goals = einops.rearrange(goals, 'b d -> b 1 d')
         if goals.shape[1] == states_length and self.goal_seq_len == 1:
@@ -248,6 +250,8 @@ class DiffusionTransformer(nn.Module):
         return states_global, proprio_embed
 
     def process_goal_embeddings(self, goals):
+        if goals is None:
+            return None
         goal_embed = self.lang_emb(goals)
         return goal_embed
 
@@ -263,7 +267,7 @@ class DiffusionTransformer(nn.Module):
     def concatenate_inputs(self, emb_t, goal_x, state_x, proprio_x, uncond=False):
         input_seq_components = [state_x]
 
-        if self.goal_conditioned:
+        if self.goal_conditioned or goal_x is not None:
             input_seq_components.insert(0, goal_x)
 
         if proprio_x is not None:

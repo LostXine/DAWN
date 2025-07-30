@@ -2,7 +2,7 @@ defaults:
   - basic_config
   - _self_
   - override dataset: calvin_ABC_D
-  - override model: LDM_stage1
+  - override model: LDM_support
 
 project: DAWN_stage_1
 
@@ -13,5 +13,5 @@ loader:
   num_workers: 4
 
 trainer:
-  total_steps: 50000
+  total_steps: 100000
   

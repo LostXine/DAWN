@@ -398,7 +398,7 @@ def get_sequences(num_sequences=1000, num_workers=None, seq_len=5):
 
 
 if __name__ == "__main__":
-    seq_len = 5
+    seq_len = 1
     results = get_sequences(100, seq_len=seq_len)
     for i, (initial_state, seq) in enumerate(results):
         # print(f"Initial state: {initial_state}")
@@ -421,22 +421,24 @@ if __name__ == "__main__":
     for task, freq in sorted(all_counters.items(), key=lambda x: x[1], reverse=True):
         print(f"{task}: {freq / sum(all_counters.values()) * 100:.2f}")
 
-    # from copy import deepcopy
-    # succ = deepcopy(counters[0])
-    # lst = open("/home/nero/temp.py","r").readlines()
-    # lst = [x.split(":")[0] for x in lst]
-    # for x in lst:
-    #     succ[x] -= 1 
-    # print(*["-"] * 20)
-    # final = []
 
-    # total = 0
-    # for k, v in succ.items():
-    #     final.append((succ[k] / counters[0][k] * 100, k, v, counters[0][k]))
-    #     total += v
-    # final = sorted(final, key=lambda x: x[0], reverse=True)
-    # for i, x in enumerate(final):
-    #     print(f"ID: {i} - Success: {x[0]:.2f}%, Task: {x[1]}, Count: {x[2]}, Total: {x[3]}")
-    # print(total)
+    
+    from copy import deepcopy
+    succ = deepcopy(counters[0])
+    lst = open("/home/nero/temp.py","r").readlines()
+    lst = [x.split(":")[0] for x in lst]
+    for x in lst:
+        succ[x] -= 1 
+    print(*["-"] * 20)
+    final = []
+
+    total = 0
+    for k, v in succ.items():
+        final.append((succ[k] / counters[0][k] * 100, k, v, counters[0][k]))
+        total += v
+    final = sorted(final, key=lambda x: x[0], reverse=True)
+    for i, x in enumerate(final):
+        print(f"ID: {i} - Success: {x[0]:.2f}%, Task: {x[1]}, Count: {x[2]}, Total: {x[3]}")
+    print(total)
     # print("succ:", succ)
     # print(lst)

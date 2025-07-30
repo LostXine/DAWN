@@ -61,7 +61,7 @@ if __name__ == "__main__":
     parser.add_argument("--num_workers", type=int, default=multiprocessing.cpu_count(), help="Number of CPU cores to use")
     args = parser.parse_args()
 
-    splits = ["training", "validation"]
+    splits = ["train",]
     
     model = hub.load("https://tfhub.dev/google/universal-sentence-encoder/4")
 

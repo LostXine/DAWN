@@ -1,0 +1,11 @@
+train:  
+  _target_: dawn.data.realworld.realworld.RealworldDataset
+  data_path: data/realworld/grasp_place_apple_orange_pot_basket
+  split: training 
+  num_frames: 3
+
+val:
+  _target_: dawn.data.realworld.realworld.RealworldDataset
+  data_path: data/realworld/grasp_place_apple_orange_pot_basket
+  split: training 
+  num_frames: 3

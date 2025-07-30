@@ -121,9 +121,7 @@ class TransformerDiffusionPolicy(nn.Module):
         self.act_window_size = act_seq_len
         self.action_dim = action_dim
         self.criterion = torch.nn.functional.mse_loss  # Assuming MSE loss for action classification
-
-        self.generator = torch.Generator(device=self.device).manual_seed(0)
-
+    
 
     @property
     def device(self):
@@ -143,10 +141,7 @@ class TransformerDiffusionPolicy(nn.Module):
         
         visual_feat = self.feature_extractor(inp).last_hidden_state  # [B, C, H, W] -> [B, N, C]
         
-        if "visual_input2" in x:
-            gripper_feat = x["visual_input2"]
-        else:
-            visual_feat, gripper_feat = visual_feat.chunk(2)
+        visual_feat, gripper_feat = visual_feat.chunk(2)
         visual_feat = torch.cat([visual_feat, gripper_feat], dim=1)  # [B, N, C] -> [B, 2N, C]
         
         perceptual_emb = {
@@ -361,11 +356,6 @@ class TransformerDiffusionPolicy(nn.Module):
             loss = self.criterion(act_seq.flatten(start_dim=1), labels.flatten(start_dim=1))
             # print(f"GT: {labels.min()} {labels.max()} {labels.mean()}, loss: {loss.item()}")
             return_dict["loss"] = loss
-            # print(f"Loss: {loss:.04f}")
-        
-        # for a, g, l in zip(act_seq, labels, self.criterion(act_seq.flatten(start_dim=1), labels.flatten(start_dim=1), reduction='none')):
-        #     print("Pred", (a * 1e4).long())
-        #     print("GT", (g * 1e4).long())
         return return_dict
         
     def denoise_actions(  # type: ignore
@@ -390,7 +380,6 @@ class TransformerDiffusionPolicy(nn.Module):
         input_state = perceptual_emb
         sigmas = self.get_noise_schedule(sampling_steps, self.noise_scheduler)
 
-        # self.generator = torch.Generator(device=self.device).manual_seed(0)
         x = torch.randn((len(latent_goal), self.act_window_size, self.action_dim), device=self.device) * self.sigma_max
 
         actions = self.sample_loop(sigmas, x, input_state, latent_goal, latent_plan, self.sampler_type, extra_args)

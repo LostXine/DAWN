@@ -14,37 +14,24 @@ from omegaconf  import OmegaConf
 import numpy as np
 
 from torch.utils.data import Dataset
+from dawn.data.base_dataset import BaseDataset
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(name)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-class CalvinDataset(Dataset):
+class CalvinDataset(BaseDataset):
     def __init__(self, 
         data_path, 
         split="training", 
         image_size=256,
         num_frames=2,
         num_actions=10,
-        min_skip=5,
-        max_skip=30,
-        observation_type: List[str] = ["rgb_static", "rgb_gripper"]  # Default observation types
+        min_skip=10, #5,
+        max_skip=30, #30,
+        observation_type: List[str] = ["rgb_static", "rgb_gripper"],  # Default observation types
+        **kwargs
     ):
-        timer = Timer()
-
         self.data_path = os.path.join(data_path, split, "episodes")
-        self.observation_type = observation_type
-        self.image_size = image_size
-        self.num_frames = num_frames
-        self.num_actions = num_actions
-        self.min_skip = min_skip
-        self.max_skip = max_skip
-
-        self.split = split
-
-        if not os.path.exists(self.data_path):
-            raise ValueError(f"Data path {self.data_path} does not exist.")
-
-        
         # Load task + language annotations
         self.annos = OmegaConf.load(os.path.join(data_path, "annotations.yaml"))
         self.r_map = {}
@@ -53,90 +40,69 @@ class CalvinDataset(Dataset):
                 self.r_map[x] = k
             self.annos[k].append(k.replace("_", " "))
 
-        self.episodes = self._load_episodes()
-        self.transform = self._get_transform()
-
-        logger.info(f"Loading from {data_path} takes {timer.seconds():.2f} seconds.")
-
-    def _get_transform(self):
-        if self.split == "training":
-            return A.Compose([
-                A.Affine(scale=(0.8, 1.2), rotate=(-15, 15),
-                    translate_percent=(-0.1, 0.1), shear=(-10, 10), p=0.5),
-                A.Resize(self.image_size, self.image_size),
-                A.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1, p=0.5),
-                # A.OneOf([
-                #     A.GaussNoise(std_limit=(0.1, 0.2), p=0.5),
-                #     A.ISONoise(color_shift=(0.01, 0.05), intensity=(0.1, 0.5), p=0.5),
-                #     A.MultiplicativeNoise(multiplier=(0.9, 1.1), per_channel=True, p=0.5),
-                #     A.SaltAndPepper(p=0.5)
-                # ], p=0.3),
-
-                ToTensorV2(),
-            ])
-        return A.Compose([
-            A.Resize(self.image_size, self.image_size),
-            ToTensorV2(),
-        ])
-
-    def _load_episodes(self):
-        
-        # Load episodes
-        episodes = []
-        total_frames = 0
-        for episode_file in sorted(os.listdir(self.data_path)):
-            episode = {
-                "idx": episode_file,
-                "path": os.path.join(self.data_path, episode_file),
-            }
-            metadata = json.load(open(os.path.join(episode["path"], "metadata.json"), "r"))
-            episode["metadata"] = metadata
-            episode["metadata"]["task"] = self.r_map[metadata["language"]]
-            episodes.append(episode)
-
-        logger.info(f"Loaded {len(episodes)} episodes from {self.data_path}") 
-        logger.info(f"Loaded {total_frames} frames in total from {self.data_path}")      
-        return episodes
-
-    def __len__(self):
-        return len(self.episodes)
+        super().__init__(data_path, split, image_size, num_frames, num_actions, min_skip, max_skip, observation_type)
     
-    def __getitem__(self, idx):
-        # idx=0
-        # idx = 0
-        episode = self.episodes[idx]
-        metadata = episode["metadata"]
-
-        # Augment the language in the same task
-        language = random.choice(self.annos[metadata["task"]])
-        data = {
-            "idx": episode["idx"],
-            "language": language # metadata["language"],
-            # "language_embedding": torch.tensor(metadata["language_embedding"], dtype=torch.float32),
-        }
-        frame_idx = random.choice(range(metadata["length"]))
-        # frame_idx = 0
-        data["action"] = torch.tensor(metadata["rel_actions"][frame_idx: frame_idx + self.num_actions])
-        # Pad actions if they are less than num_actions
-        if len(data["action"]) < self.num_actions:
-            pad_length = self.num_actions - len(data["action"])
-            last_action = data["action"][-1:]
-            data["action"] = torch.cat([data["action"], last_action.repeat(pad_length, 1)], dim=0)
-            # data["action"] = torch.cat([data["action"], torch.zeros((pad_length, data["action"].shape[1]), dtype=torch.float32)], dim=0)
+    # def __len__(self):
+    #     if self.split == "training":
+    #         return len(self.episodes) * 1000
         
-        # next_idx = min(metadata["length"] - 1, frame_idx + self.num_actions)
-        skip = random.randint(self.min_skip, self.max_skip)
-        next_idx = min(metadata["length"] - 1, frame_idx + skip)
-        skip = next_idx - frame_idx
-        frame_idx = [frame_idx, next_idx]
-        data["skip_frame"] = torch.tensor(skip, dtype=torch.int64)
+    #     return len(self.episodes)
+    
+    # def __getitem__(self, idx):
+    #     idx = idx % len(self.episodes)
+    #     return super().__getitem__(idx)
+    
+    # def _load_episodes(self):    
+    #     episodes = super()._load_episodes()
+    #     for episode in episodes:
+    #         metadata = episode["metadata"]
+    #         episode["metadata"]["task"] = self.r_map[metadata["language"]]
+    #     return episodes
 
-        for obs_type in self.observation_type:
-            obs_files = sorted(glob.glob(os.path.join(episode["path"], obs_type, '*.jpg')))
-            images = np.stack([imageio.imread(obs_files[idx]) for idx in frame_idx], axis=0)
-            data[obs_type] = self.transform(images=images)["images"] / 255.
-            # data[obs_type] = torch.stack([self.transform(image=)["image"] ]) / 255. 
-        return data
+    # def __getitem__(self, idx):
+    #     # idx=0
+    #     # idx = 0
+    #     episode = self.episodes[idx]
+    #     metadata = episode["metadata"]
+
+    #     # Augment the language in the same task
+    #     language = random.choice(self.annos[metadata["task"]])
+    #     data = {
+    #         "idx": episode["idx"],
+    #         "language": language # metadata["language"],
+    #         # "language_embedding": torch.tensor(metadata["language_embedding"], dtype=torch.float32),
+    #     }
+    #     frames = [random.choice(range(metadata["length"]))]
+    #     skips = []
+    #     while len(frames) < self.num_frames:
+    #         skip = random.randint(self.min_skip, self.max_skip)
+    #         next_idx = min(metadata["length"] - 1, frames[-1] + skip)
+    #         frames.append(next_idx)
+    #         skips.append(skip)
+    #     frame_idx = frames[-2]
+    #     # frame_idx = random.choice(range(metadata["length"]))
+    #     # frame_idx = 0
+    #     data["action"] = torch.tensor(metadata["rel_actions"][frame_idx: frame_idx + self.num_actions])
+    #     # Pad actions if they are less than num_actions
+    #     if len(data["action"]) < self.num_actions:
+    #         pad_length = self.num_actions - len(data["action"])
+    #         last_action = data["action"][-1:]
+    #         data["action"] = torch.cat([data["action"], last_action.repeat(pad_length, 1)], dim=0)
+    #         # data["action"] = torch.cat([data["action"], torch.zeros((pad_length, data["action"].shape[1]), dtype=torch.float32)], dim=0)
+        
+    #     # next_idx = min(metadata["length"] - 1, frame_idx + self.num_actions)
+    #     # skip = random.randint(self.min_skip, self.max_skip)
+    #     # next_idx = min(metadata["length"] - 1, frame_idx + skip)
+
+    #     skip = skips[-1]
+    #     data["skip_frame"] = torch.tensor(skip, dtype=torch.int64)
+
+    #     for obs_type in self.observation_type:
+    #         obs_files = sorted(glob.glob(os.path.join(episode["path"], obs_type, '*.jpg')))
+    #         images = np.stack([imageio.imread(obs_files[idx]) for idx in frames], axis=0)
+    #         data[obs_type] = self.transform(images=images)["images"] / 255.
+    #         # data[obs_type] = torch.stack([self.transform(image=)["image"] ]) / 255. 
+    #     return data
 
 if __name__ == "__main__":
     dataset = CalvinDataset(

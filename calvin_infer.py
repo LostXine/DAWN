@@ -153,7 +153,7 @@ def evaluate_policy(cfg, model, env, accelerator, log_dir):
         progress.update(eval_task, advance=1)
 
     progress.stop()
-    return results, sequences
+    return results, eval_sequences
 
 def evaluate_sequence(
     env, model, task_checker, initial_state, eval_sequence, lang_embeddings, val_annotations, progress, cfg, record, rollout_video, rollout_video2, i
@@ -303,6 +303,7 @@ def main(cfg):
 
 if __name__ == "__main__":
     with hydra.initialize(config_path="configs"):
-        cfg = hydra.compose(config_name="infer", overrides=sys.argv[2:])
+        print(sys.argv[2:])
+        cfg = hydra.compose(config_name="infer", overrides=sys.argv[1:])
         OmegaConf.resolve(cfg)
         main(cfg)

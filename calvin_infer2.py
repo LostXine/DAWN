@@ -13,11 +13,14 @@ import numpy as np
 from torch import optim
 from rich.progress import Progress, SpinnerColumn, BarColumn, MofNCompleteColumn, TextColumn, TimeElapsedColumn, TimeRemainingColumn
 import json
-
+import time
 from utils.logging import setup_logging
 import random
+from accelerate.utils import gather_object
 
-import tensorflow_hub as hub
+
+from torch.nn.parallel import DistributedDataParallel
+# import tensorflow_hub as hub
 
 from inference.multistep_sequences import get_sequences
 from inference.utils_infer import get_env_state_for_initial_condition, join_vis_lang
@@ -27,6 +30,17 @@ from calvin_env.envs.play_table_env import get_env
 
 logger = logging.getLogger(__name__)
 
+
+class ListDataset(torch.utils.data.Dataset):
+    def __init__(self, data):
+        self.data = data
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        return (idx, self.data[idx])
+        
 def get_video_tag(i):
     # if dist.is_available() and dist.is_initialized():
     #     i = i * dist.get_world_size() + dist.get_rank()
@@ -57,7 +71,7 @@ def print_and_save(results, sequences, cfg, log_dir):
     cnt_success = Counter()
     cnt_fail = Counter()
 
-    for result, (_, sequence) in zip(results, sequences):
+    for result, sequence in zip(results, sequences):
         for successful_tasks in sequence[:result]:
             cnt_success[successful_tasks] += 1
         if result < len(sequence):
@@ -79,8 +93,6 @@ def print_and_save(results, sequences, cfg, log_dir):
     with open(os.path.join(log_dir, "results.json"), "w") as file:
         json.dump(json_data, file, indent=4)
 
-
-
 def evaluate_policy(cfg, model, env, accelerator, log_dir):
     progress = Progress(
         TextColumn("{task.description}"),
@@ -99,19 +111,30 @@ def evaluate_policy(cfg, model, env, accelerator, log_dir):
         num_sequences=cfg.inference.num_sequences, 
         seq_len=seq_len,
     )
+
+    dataset = ListDataset(eval_sequences)
+    eval_loader = DataLoader(
+        dataset,
+        batch_size=1,
+        shuffle=False,
+        collate_fn=lambda x: x,
+    )
+    dataloader = accelerator.prepare(eval_loader)
+
     results = []
+    sequences = []
     plans = []
     
-    eval_task = progress.add_task("Evaluating sequences", total=len(eval_sequences))
+    eval_task = progress.add_task("Evaluating sequences", total=len(dataloader))
     
 
     #####
     val_annotations = cfg.annotation
-    lang_model = hub.load("https://tfhub.dev/google/universal-sentence-encoder/4")
+    # lang_model = hub.load("https://tfhub.dev/google/universal-sentence-encoder/4")
 
     lang_embeddings = {}
-    for task, annotation in val_annotations.items():
-        lang_embeddings[task] = lang_model([annotation[0]]).numpy()
+    # for task, annotation in val_annotations.items():
+    #     lang_embeddings[task] = lang_model([annotation[0]]).numpy()
         # logger.info(f"Loaded language embedding for task {task}: {annotation} with shape {lang_embeddings[task].shape}")
     
     rollout_video = RolloutVideo(
@@ -131,29 +154,44 @@ def evaluate_policy(cfg, model, env, accelerator, log_dir):
         )
 
     record = cfg.inference.record_rollout_videos
+    device = next(model.parameters()).device
     ###
-    for i, (initial_state, eval_sequence) in enumerate(eval_sequences):
+    for i, data in enumerate(dataloader):
+        idx, (initial_state, eval_sequence) = data[0]
+        start_time = time.time()
+        task_sequence = " -> ".join(eval_sequence)
+        description = f"Evaluating sequence {i + 1}/{len(dataloader)}: {task_sequence}"
+        logger.info(description)
         result = evaluate_sequence(
-            env, model, task_oracle, initial_state, eval_sequence, lang_embeddings, val_annotations, progress, cfg, record, rollout_video, rollout_video2, i
+            env, model, task_oracle, initial_state, eval_sequence, lang_embeddings, val_annotations, progress, cfg, record, rollout_video, rollout_video2, idx
         )
+        # result = idx
+        end_time = time.time()
         results.append(result)
-        
+        sequences.append(eval_sequence)
         success_rates = count_success(results, seq_len)
         average_rate = sum(success_rates) / len(success_rates) * seq_len
-        description = " ".join([f"{i + 1}/{seq_len} : {v:.3f}% |" for i, v in enumerate(success_rates)])
-        description += f" Average: {average_rate:.3f} |"    
+        description = f"Device {device}: " + " ".join([f"{i + 1}/{seq_len} : {v:.3f}% |" for i, v in enumerate(success_rates)])
+        description += f" Average: {average_rate:.3f} | Time: {end_time - start_time:.2f}s | "    
         logger.info(description)
 
         if record:
+            logger.info(f"Writing rollout video for sequence {idx}...")
             rollout_video.write_to_tmp()
-            rollout_video._log_currentvideos_to_file(i, result, save_as_video=True)
-            rollout_video2.write_to_tmp()
-            rollout_video2._log_currentvideos_to_file(i, result, save_as_video=True)
+            rollout_video._log_currentvideos_to_file(idx, result, save_as_video=True)
+            if cfg.inference.record_flow:
+                rollout_video2.write_to_tmp()
+                rollout_video2._log_currentvideos_to_file(idx, result, save_as_video=True)
 
         progress.update(eval_task, advance=1)
 
     progress.stop()
-    return results
+    logger.info("Evaluation completed. Waiting for all processes to finish...")
+    results = gather_object(results)
+    sequences = gather_object(sequences)
+    # logger.info(results)
+    # logger.info(sequences)
+    return results, sequences
 
 def evaluate_sequence(
     env, model, task_checker, initial_state, eval_sequence, lang_embeddings, val_annotations, progress, cfg, record, rollout_video, rollout_video2, i
@@ -163,7 +201,8 @@ def evaluate_sequence(
     if record:
         caption = " | ".join(eval_sequence)
         rollout_video.new_video(tag=get_video_tag(i), caption=caption)
-        rollout_video2.new_video(tag=get_video_tag(i), caption=caption)
+        if cfg.inference.record_flow:
+            rollout_video2.new_video(tag=get_video_tag(i), caption=caption)
     success_counter = 0
     if cfg.debug:
         time.sleep(1)
@@ -171,15 +210,18 @@ def evaluate_sequence(
         print()
         print(f"Evaluating sequence: {' -> '.join(eval_sequence)}")
         print("Subtask: ", end="")
+    # accelerate.utils.set_seed(cfg.seed)
     for idx, subtask in enumerate(eval_sequence):
         if record:
             rollout_video.new_subtask()
-            rollout_video2.new_subtask()
+            if cfg.inference.record_flow:
+                rollout_video2.new_subtask()
         # success = random.randint(0, 1)
         success = rollout(env, model, task_checker, cfg, idx, subtask, lang_embeddings, val_annotations, progress, record, rollout_video, rollout_video2)
         if record:
             rollout_video.draw_outcome(success)
-            rollout_video2.draw_outcome(success)
+            if cfg.inference.record_flow:
+                rollout_video2.draw_outcome(success)
         if success:
             success_counter += 1
         else:
@@ -193,34 +235,61 @@ def get_transform(image_size=128):
         A.Resize(image_size, image_size),
         ToTensorV2(),
     ])
+
+def reset(model):
+    if isinstance(model, DistributedDataParallel):
+        model.module.reset()
+    else:
+        model.reset()
+    return model
 def rollout(env, model, task_oracle, cfg, idx, subtask, lang_embeddings, val_annotations, progress, record=False, rollout_video=None, rollout_video2=None):
     if cfg.debug:
         print(f"{subtask} ", end="")
         time.sleep(0.5)
     obs = env.get_obs()
+    
+    model = reset(model)
+    start_info = env.get_info()
+    transform = get_transform(cfg.inference.image_size)
+    device = next(model.parameters()).device
+
+    history = {}
+    history["rgb_static"] = [transform(image=obs["rgb_obs"]["rgb_static"])["image"][None, None, ].to(device) / 255. for _ in range(3)]
+    history["rgb_gripper"] = [transform(image=obs["rgb_obs"]["rgb_gripper"])["image"][None, None].to(device) / 255. for _ in range(3)]
+
     # get lang annotation for subtask
     lang_annotation = val_annotations[subtask][0]
     # get language goal embedding
 
-    goal = lang_embeddings[subtask]
+    # goal = lang_embeddings[subtask]
     # goal['lang_text'] = val_annotations[subtask][0]
-    model.reset()
-    start_info = env.get_info()
 
-    transform = get_transform(cfg.inference.image_size)
-    device = next(model.parameters()).device
-
+    
     bar = progress.add_task(f"Rollout {idx}. {subtask}", total=cfg.inference.ep_len)
+    total_time = 0
     for step in range(cfg.inference.ep_len):
-        # action = torch.rand(7)
         inputs = {
-            "rgb_static": transform(image=obs["rgb_obs"]["rgb_static"])["image"][None, None, ].to(device) / 255. ,
-            "rgb_gripper": transform(image=obs["rgb_obs"]["rgb_gripper"])["image"][None, None].to(device) / 255. ,
+            "rgb_static": torch.cat(history["rgb_static"][-3:], dim=1),
+            "rgb_gripper": torch.cat(history["rgb_gripper"][-3:], dim=1),
             "language": lang_annotation, 
-            "language_embedding": torch.tensor(goal).to(device),
             "skip_frame": torch.tensor(20).view(-1).to(device)
         }
-        action_output = model.step(inputs)
+        # action = torch.rand(7)
+        # inputs = {
+        #     "rgb_static": (transform(image=obs["rgb_obs"]["rgb_static"])["image"][None, None, ].to(device) / 255.).repeat(1, 3, 1, 1, 1),
+        #     "rgb_gripper": (transform(image=obs["rgb_obs"]["rgb_gripper"])["image"][None, None].to(device) / 255.).repeat(1, 3, 1, 1, 1) ,
+        #     "language": lang_annotation, 
+        #     # "language_embedding": torch.tensor(goal).to(device),
+        #     "skip_frame": torch.tensor(20).view(-1).to(device)
+        # }
+        stime = time.time()
+        if isinstance(model, DistributedDataParallel):
+            action_output = model.module.step(inputs, visualize=cfg.inference.record_flow)
+        else:   
+            action_output = model.step(inputs, visualize=cfg.inference.record_flow)
+        etime= time.time()
+        logger.info(f"Inference time step {step}: {etime - stime:.2f}s")
+        total_time += etime - stime
         action = action_output["action"]
         viz_flow = action_output["viz_flow"]
         # logger.info(f"Step {step + 1}: {action}")
@@ -229,6 +298,25 @@ def rollout(env, model, task_oracle, cfg, idx, subtask, lang_embeddings, val_ann
         #print('obs_max:',obs["rgb_obs"]['cond_static'].max())
         #print('obs_shape:', obs["rgb_obs"]['cond_static'].shape)
         obs, _, _, current_info = env.step(action)
+        # update history
+        if step % cfg.inference.multistep == 0:
+            model = reset(model)
+        else:
+            history["rgb_static"].pop(-1)
+            history["rgb_static"].pop(-1)
+            history["rgb_gripper"].pop(-1)
+            history["rgb_gripper"].pop(-1)
+            
+        history["rgb_static"].append(transform(image=obs["rgb_obs"]["rgb_static"])["image"][None, None, ].to(device) / 255.)
+        history["rgb_static"].append(transform(image=obs["rgb_obs"]["rgb_static"])["image"][None, None, ].to(device) / 255.)
+        history["rgb_gripper"].append(transform(image=obs["rgb_obs"]["rgb_gripper"])["image"][None, None].to(device) / 255.)
+        history["rgb_gripper"].append(transform(image=obs["rgb_obs"]["rgb_gripper"])["image"][None, None].to(device) / 255.)
+        # remove oldest history
+        while len(history["rgb_static"]) > 3:
+            history["rgb_static"].pop(0)
+        while len(history["rgb_gripper"]) > 3:
+            history["rgb_gripper"].pop(0)
+            
         if cfg.debug:
             img = env.render(mode="rgb_array")
             join_vis_lang(img, lang_annotation)
@@ -236,11 +324,13 @@ def rollout(env, model, task_oracle, cfg, idx, subtask, lang_embeddings, val_ann
         if record:
             # update video
             rollout_video.update(obs["rgb_obs"]["rgb_static"])
-            rollout_video2.update(viz_flow)
+            if cfg.inference.record_flow and viz_flow is not None:
+                rollout_video2.update(viz_flow)
         # check if current step solves a task
         current_task_info = task_oracle.get_task_info_for_set(start_info, current_info, {subtask})
         if len(current_task_info) > 0:
-            model.reset()  # Reset model for next task
+            model = reset(model)
+            logger.info(f"Average step time: {total_time / (step + 1):.2f}s")
             progress.update(bar, advance=cfg.inference.ep_len - step)
             progress.remove_task(bar)
 
@@ -248,61 +338,94 @@ def rollout(env, model, task_oracle, cfg, idx, subtask, lang_embeddings, val_ann
                 print(colored("success", "green"), end=" ")
             if record:
                 rollout_video.add_language_instruction(lang_annotation)
-                rollout_video2.add_language_instruction(lang_annotation)
+                if cfg.inference.record_flow:
+                    rollout_video2.add_language_instruction(lang_annotation)
             return True
 
         else:
             progress.update(bar, advance=1)
     
+
+    logger.info(f"Average step time: {total_time / cfg.inference.ep_len:.2f}s")
     progress.remove_task(bar)
-    logger.info(f"Failed to solve task {subtask}:{lang_annotation} in sequence {idx}.")
+    logger.info(f"Failed to solve task {subtask}:{lang_annotation} in order {idx}.")
     if cfg.debug:
         print(colored("fail", "red"), end=" ")
     if record:
         rollout_video.add_language_instruction(lang_annotation)
-        rollout_video2.add_language_instruction(lang_annotation)
+        if cfg.inference.record_flow:
+            rollout_video2.add_language_instruction(lang_annotation)
     return False
 
 
 def main(cfg):
-    accelerator = accelerate.Accelerator(**cfg.accelerator)
 
+    from datetime import timedelta
+    from accelerate import Accelerator
+    from accelerate.utils import InitProcessGroupKwargs
+
+    kwargs = InitProcessGroupKwargs(timeout=timedelta(seconds=864000))
+    accelerator = accelerate.Accelerator(**cfg.accelerator, kwargs_handlers=[kwargs])
+    device = accelerator.device
+    accelerate.utils.set_seed(cfg.seed)
+    
     # accelerator.init_trackers(
     #     project_name=cfg.project,
     #     config=OmegaConf.to_container(cfg, resolve=True)
     # )
-    accelerate.utils.set_seed(cfg.seed)
 
+    # total = 0
     log_dir = cfg.inference.save_dir
-    setup_logging(accelerator.is_main_process, log_dir=log_dir)
+    setup_logging(accelerator.is_main_process, device=accelerator.local_process_index, log_dir=log_dir)
 
     logger.info("Configuration:\n" + OmegaConf.to_yaml(cfg))
 
     model = hydra.utils.instantiate(cfg.model)
 
     if cfg.weights:
-        if os.path.exists(cfg.weights):
-            logger.info(f"Loading model weights from {cfg.weights}.")
-            logger.info(model.load_state_dict(torch.load(cfg.weights, map_location="cpu"), strict=False))
+        checkpoint_path = cfg.weights
+        if os.path.exists(checkpoint_path):
+            logger.info(f"Loading model weights from {checkpoint_path}.")
+            # logger.info(model.load_state_dict(torch.load(cfg.weights, map_location="cpu"), strict=False))
+
+            ckpt = torch.load(checkpoint_path, map_location="cpu")
+            state_dict = model.state_dict()
+            new_state_dict = {}
+            for k, v in ckpt.items():
+                if k in state_dict:
+                    module = state_dict.pop(k)
+                    if v.shape == module.shape:
+                        new_state_dict[k] = v
+                    else:
+                        logger.warning(f"[pink]Skipping loading {k} from checkpoint: Shape mismatch: checkpoint: {v.shape}, model: {module.shape}")
+                else:
+                    logger.warning(f"[pink]Skipping loading {k} from checkpoint: Not found in model.")
+            # if len(state_dict):
+            #     logger.info(f"Missing keys: {state_dict.keys()}")
+            # self.model.load_state_dict(state_dict)
+            logger.info(model.load_state_dict(new_state_dict, strict=False))
+            # logger.info(self.model.load_state_dict(ckpt, strict=False))
+                
         else:
             logger.warning(f"Model weights file not found: {cfg.weights}. Skipping loading weights.")
-        # model.load_weights()
+        model.load_weights()
         # from diffusers import AutoencoderKL
         # vae = AutoencoderKL.from_pretrained("madebyollin/sdxl-vae-fp16-fix")
         # model.imagine_model.vae = vae
         # model.imagine_model.vae.requires_grad_(False)
 
-    model.load_weights()
+    # model.load_weights()
     model = accelerator.prepare(model)
     model.eval()
 
     env = get_env(cfg.inference.dataset, show_gui=False)
     
-    results = evaluate_policy(cfg, model, env, accelerator, log_dir=log_dir)
-    print_and_save(results, cfg, log_dir=log_dir)
-
+    results, sequences = evaluate_policy(cfg, model, env, accelerator, log_dir=log_dir)
+    if accelerator.is_main_process:
+        print_and_save(results, sequences, cfg, log_dir=log_dir)
+        
 if __name__ == "__main__":
     with hydra.initialize(config_path="configs"):
-        cfg = hydra.compose(config_name="infer", overrides=sys.argv[2:])
+        cfg = hydra.compose(config_name="infer", overrides=sys.argv[1:])
         OmegaConf.resolve(cfg)
         main(cfg)

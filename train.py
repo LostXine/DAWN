@@ -7,15 +7,19 @@ import hydra
 from omegaconf import DictConfig, OmegaConf
 from torch.utils.data import DataLoader
 from diffusers.optimization import get_cosine_schedule_with_warmup
-
+from accelerate.utils import DistributedDataParallelKwargs
 from utils.logging import setup_logging
 from torch import optim
 
 from dawn.trainer import Trainer
 
 def main(cfg: DictConfig = None):
+    # Create an instance of DistributedDataParallelKwargs and set find_unused_parameters
+    ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
+
+
     # Initialize the accelerator
-    accelerator = accelerate.Accelerator(**cfg.accelerator)
+    accelerator = accelerate.Accelerator(**cfg.accelerator, kwargs_handlers=[ddp_kwargs])
 
     accelerator.init_trackers(
         project_name=cfg.project,
@@ -29,24 +33,39 @@ def main(cfg: DictConfig = None):
     logger.info("Configuration:\n" + OmegaConf.to_yaml(cfg))
 
     # # Init dataset
-    train_dataset = hydra.utils.instantiate(cfg.dataset.train)
+    if not cfg.dataset.train.get("_target_"):
+        logger.info("Multiple training datasets found, concatenating them.")
+        train_dataset = []
+        for k, v in cfg.dataset.train.items():
+            repeat = v.get("repeat", 1)
+            logger.info(f"Building dataset {k} with weight {repeat}.")
+            ds = hydra.utils.instantiate(v)
+            train_dataset.extend([ds] * repeat)
+        train_dataset = torch.utils.data.ConcatDataset(train_dataset)
+        logger.info(f"Train dataset length: {len(train_dataset)}", )
+    else:    
+        train_dataset = hydra.utils.instantiate(cfg.dataset.train)
     val_dataset = hydra.utils.instantiate(cfg.dataset.val)
 
+    # print(val_dataset[0])
+    # exit(0)
     # Init dataloader
     train_loader = DataLoader(
         train_dataset, 
         batch_size=cfg.loader.train_batch_size, 
         shuffle=True, 
-        num_workers=cfg.loader.num_workers,
+        num_workers=2,#cfg.loader.num_workers,
         pin_memory=True, 
+        # prefetch_factor=1,
         
     )
     val_loader = DataLoader(
         val_dataset,
         batch_size=cfg.loader.val_batch_size,
-        shuffle=False,
-        num_workers=cfg.loader.num_workers,
-        pin_memory=True
+        shuffle=True,
+        num_workers=2,#cfg.loader.num_workers,
+        pin_memory=True,
+        # prefetch_factor=0,
     )
 
     model = hydra.utils.instantiate(cfg.model)

@@ -299,10 +299,11 @@ class RolloutVideo:
         else:
             filename = self.save_dir / f"{tag}_{current_step}_success={results}.gif"
         if save_as_video:
-            clip.write_videofile(filename, codec='libx264', bitrate="5000k", logger=None)  # You can adjust the bitrate as needed
+            clip.write_videofile(filename, codec='libx264', bitrate="5000k", logger=None, verbose=False)  # You can adjust the bitrate as needed
         else:
             clip.write_gif(filename, logger=None)
-    
+
+        return filename
     def save_frames_to_subfolder(self, n, rollout_index):
         # Ensure n is a valid number
         if n <= 0 or not isinstance(n, int):

@@ -29,8 +29,10 @@ class Trainer:
         self.save_dir = os.path.join(cfg.save_dir, "checkpoints")
         os.makedirs(self.save_dir, exist_ok=True)
 
+
+        self.cur_step = 0        
         self.load_checkpoint(checkpoint_path)
-        # self.model.load_weights()
+        self.model.load_weights()
     
         # Prepare the model and optimizer with the accelerator
         logger.info(f"Preparing model and optimizer with {self.accelerator.__class__.__name__}.")
@@ -60,10 +62,34 @@ class Trainer:
         Args:
             checkpoint_path (str): Path to the checkpoint file.
         """
+
         if checkpoint_path is not None:
             logger.info(f"Loading model weights from {checkpoint_path}.")
             if os.path.exists(checkpoint_path):
-                logger.info(self.model.load_state_dict(torch.load(checkpoint_path, map_location="cpu"), strict=False))
+                ckpt = torch.load(checkpoint_path, map_location="cpu")
+                state_dict = self.model.state_dict()
+                new_state_dict = {}
+                for k, v in ckpt.items():
+                    if k in state_dict:
+                        module = state_dict.pop(k)
+                        if v.shape == module.shape:
+                            new_state_dict[k] = v
+                        else:
+                            logger.warning(f"[pink]Skipping loading {k} from checkpoint: Shape mismatch: checkpoint: {v.shape}, model: {module.shape}")
+                    else:
+                        logger.warning(f"[pink]Skipping loading {k} from checkpoint: Not found in model.")
+                # if len(state_dict):
+                #     logger.info(f"Missing keys: {state_dict.keys()}")
+                # self.model.load_state_dict(state_dict)
+                logger.info(self.model.load_state_dict(new_state_dict, strict=False))
+                # logger.info(self.model.load_state_dict(ckpt, strict=False))
+                if self.cfg.resume:
+                    try:
+                        self.cur_step = int(checkpoint_path.split('_')[-1].split('.')[0])
+                        logger.info(f"Resuming training from iter {self.cur_step}")
+                        # self.
+                    except:
+                        pass
             else:
                 logger.warning(f"Weights file {checkpoint_path} does not exist. Skipping loading weights.")
         
@@ -93,7 +119,6 @@ class Trainer:
         
     def train(self):
         self.model.train()
-        self.cur_step = 0        
         logger.info(f"Starting training at step {self.cur_step} for {self.cfg.total_steps} steps.")
         train_task = self.progress.add_task(
             "[bold blue]Training...", 
@@ -158,20 +183,22 @@ class Trainer:
                 # Validation step
                 if self.cur_step % self.cfg.val_interval == 0:
                     self.validate(self.train_loader, split="train", num_steps=1)
-                    self.validate(self.val_loader, split="val")
+                    self.validate(self.val_loader, split="val", num_steps=10)
 
                 if self.cur_step >= self.cfg.total_steps:
                     break
 
                 data_time = time.time()
 
+        self.validate(self.train_loader, split="train", num_steps=1)
+        self.validate(self.val_loader, split="val")
     
     def validate(self, val_loader, split="val", num_steps=-1):
         self.model.eval()
-
         if num_steps <= 0:
             num_steps = len(val_loader)
 
+        logger.info(f"Starting validation on {split} set for {num_steps} steps.")
         val_task = self.progress.add_task(
             "[bold green]Validating...",
             total=num_steps,
@@ -199,10 +226,13 @@ class Trainer:
                         images = self.model.visualize(batch, outputs)
                     
                     if images is not None:
+                        logger.info(f"Logging validation images for {split} at step {self.cur_step}.")
                         self.accelerator.log({
                                 f"{split}/{i}": images,
                             }, step = self.cur_step
                         )
+                    else:
+                        logger.warning(f"No images to log for {split} at step {self.cur_step}.")
                 if cnt == num_steps:
                     break 
         

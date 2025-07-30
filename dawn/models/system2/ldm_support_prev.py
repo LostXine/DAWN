@@ -9,16 +9,17 @@ import einops
 from torchvision.models import optical_flow
 from torchvision.utils import flow_to_image
 import numpy as np
-
+import random
 from diffusers import (
     AutoencoderKL,
     DDPMScheduler,
     StableDiffusionInstructPix2PixPipeline,
     UNet2DConditionModel,
 )
+import math
 
-from transformers import CLIPTextModel, CLIPTokenizer
 
+from transformers import AutoModel, CLIPTextModel, CLIPTokenizer, CLIPVisionModel
 from humanfriendly import format_size
 from peft import LoraConfig, get_peft_model, set_peft_model_state_dict, PeftModel
 
@@ -38,18 +39,13 @@ class LatentMotionEstimation(nn.Module):
             num_inference_steps=25,
             use_interval: bool = False, # Whether to use interval embeddings
             input_type: str = "rgb_static", # Input type for the model, can be "rgb_static" or "rgb_gripper"
-            # use_reconstruct_loss: bool = False, # Whether to use reconstruction loss
-
-            # LoRA specific parameters
-            enable_lora: bool = True,
-            lora_rank: int = 4, # Common LoRA rank
-            lora_alpha: int = 32, # Common LoRA alpha
-            lora_dropout: float = 0.0, # Dropout for LoRA layers
-            lora_weights_path: str = None, # Path to load pre-trained LoRA weights
-
+            support_types: list = ["rgb_gripper"], # Supported input types
+            use_text_sentence: bool = False, # Whether to use text sentences for conditioning
+            use_prev_img: bool = False,
+            use_prev_flow: bool = False,
+            
         ):
         super().__init__()
-        logger.info(f"Initializing {__class__.__name__} with image size {image_size}, in_channels {in_channels}, out_channels {out_channels}, condition_dim {condition_dim}, flow_to_rgb {flow_to_rgb}.")
         self.flow_model = optical_flow.raft_large(weights=optical_flow.Raft_Large_Weights.DEFAULT, progress=False).eval()
         self.flow_transform = optical_flow.Raft_Large_Weights.DEFAULT.transforms()
         self.flow_to_rgb = flow_to_rgb
@@ -58,88 +54,43 @@ class LatentMotionEstimation(nn.Module):
         self.use_cfg = use_cfg
         self.guidance_scale = guidance_scale
         self.use_interval = use_interval
+        self.use_text_sentence = use_text_sentence
+        self.use_prev_img = use_prev_img
+        self.use_prev_flow = use_prev_flow
 
         self.input_type = input_type
+        self.support_types = support_types
         if self.input_type not in ["rgb_static", "rgb_gripper"]:
             raise ValueError(f"Invalid input type: {self.input_type}. Supported types are 'rgb_static' and 'rgb_gripper'.")
 
+
+        in_channels += 4 * (int(use_prev_img) + int(use_prev_flow))
+        logger.info(f"Initializing {__class__.__name__} with image size {image_size}, in_channels {in_channels}, out_channels {out_channels}, condition_dim {condition_dim}, flow_to_rgb {flow_to_rgb}.")
         
-        # self.use_reconstruct_loss = use_reconstruct_loss
-
-        self.enable_lora = enable_lora
-        self.lora_weights_path = lora_weights_path
-
-        
-        self.pipeline = StableDiffusionInstructPix2PixPipeline.from_pretrained(
-            pretrained,
-            safety_checker=None,
-            requires_safety_checker=False,
-            # attn_implementation="flash_attention_2",
-            # torch_dtype=torch.float16,
-        )
-
         # Load scheduler, tokenizer and models.
-        self.noise_scheduler = DDPMScheduler.from_pretrained(pretrained, subfolder="scheduler")
         self.tokenizer = CLIPTokenizer.from_pretrained(pretrained, subfolder="tokenizer")
         self.text_encoder = CLIPTextModel.from_pretrained(pretrained, subfolder="text_encoder")
         self.unet = UNet2DConditionModel.from_pretrained(pretrained, subfolder="unet")
-
-        # self.vae = AutoencoderKL.from_pretrained(pretrained, subfolder="vae")
         self.vae = AutoencoderKL.from_pretrained("madebyollin/sdxl-vae-fp16-fix")
-        
-        # self.pipeline.set_progress_bar_config(disable=True)
-        # self.pipeline.enable_xformers_memory_efficient_attention()
 
-        # self.unet = self.pipeline.unet
-        # self.vae = self.pipeline.vae
-        # self.pipeline.vae = self.vae
-
-        # self.tokenizer = self.pipeline.tokenizer
-        # self.text_encoder = self.pipeline.text_encoder
         self.unet.conv_in = nn.Conv2d(
             in_channels, self.unet.conv_in.out_channels, kernel_size=self.unet.conv_in.kernel_size, stride=self.unet.conv_in.stride, padding=self.unet.conv_in.padding
         )
         self.unet.register_to_config(in_channels=in_channels)
+        # self.unet.config.addition_embed_type = None
 
+        # History 
+        # self.image_processor = CLIPImageProcessor.from_pretrained("openai/clip-vit-base-patch16")
+        self.feature_extractor = AutoModel.from_pretrained("google/vit-base-patch16-224-in21k", add_pooling_layer=False)
+        # self.feature_extractor = CLIPVisionModel.from_pretrained("openai/clip-vit-base-patch16")
+        self.mlp = nn.Linear(self.feature_extractor.config.hidden_size, condition_dim)
+
+        # self.feature_extractor.requires_grad_(False)
         self.text_encoder.requires_grad_(False)
         self.vae.requires_grad_(False)
         self.flow_model.requires_grad_(False)
 
-        self.enable_lora=False
-        if self.enable_lora:
-            # Configure LoRA for the UNet
-            # You can also add LoRA for the text_encoder if needed, but UNet is primary
-            lora_config = LoraConfig(
-                r=8,
-                lora_alpha=32,
-                lora_dropout=0.1,
-                target_modules=["to_q", "to_v", "query", "value", "ff.net.0.proj"],
-                bias="none",
-            )
-            self.unet = get_peft_model(self.unet, lora_config)
-
-            self.unet.conv_in.requires_grad_(True)
-
-            # Apply LoRA to the UNet
-            # get_peft_model will automatically wrap the target modules
-            logger.info("LoRA applied to UNet.")
-
-            # Load LoRA weights if a path is provided
-            if self.lora_weights_path:
-                logger.info(f"Loading LoRA weights from {self.lora_weights_path}")
-                # For `load_lora_weights` on the pipeline:
-                # This is for loading LoRA weights for inference directly into the pipeline
-                self.pipeline.load_lora_weights(self.lora_weights_path)
-                logger.info(f"LoRA weights loaded into pipeline for inference.")
-
-                # If you need to explicitly load state_dict into the PEFT model (e.g., after training your own LoRA)
-                # You'd typically load the adapter directly into the PEFT model
-                # peft_model_state_dict = torch.load(self.lora_weights_path, map_location="cpu")
-                # set_peft_model_state_dict(self.unet, peft_model_state_dict)
-                # logger.info("LoRA weights loaded into PEFT UNet for further training/specific usage.")
-
-
-
+        
         # Noise scheduler, optimizer and LR scheduler.
         self.noise_scheduler = DDIMScheduler(num_train_timesteps=1000)
         self.noise_scheduler.set_timesteps(self.num_inference_steps)  # Set the number of inference steps
@@ -174,11 +125,17 @@ class LatentMotionEstimation(nn.Module):
 
         flow_tensor = einops.rearrange(flow_tensor, "(b t) c h w -> b t c h w", b=flow_input.shape[0])
         # normalize the flow
-        return flow_tensor[:, 0]
+
+        if not self.flow_to_rgb:
+            # add = (gt_rgb_flow**2).mean(dim=2, keepdim=True).sqrt() / math.sqrt(2)  # Compute the mean magnitude of the flow
+            add = flow_tensor.mean(dim=2, keepdim=True)
+            flow_tensor = torch.cat([flow_tensor, add], dim=2)
+
+        return flow_tensor
     
     @property
     def device(self):
-        return next(self.parameters()).device
+       return next(self.parameters()).device
     
     def uncond_text(self):
         try:
@@ -187,13 +144,23 @@ class LatentMotionEstimation(nn.Module):
             self.uncond_text_embed = self.encode_text([""])
             return self.uncond_text_embed
 
+    def encode_image(self, visual_input, flow = None):
+        if flow is not None:
+            visual_input = torch.cat([visual_input, flow], dim=1)  # Concatenate image and flow along the channel dimension
+        
+        visual_input = F.interpolate(visual_input, size=(self.feature_extractor.config.image_size, self.feature_extractor.config.image_size), mode='bilinear', align_corners=False)
+        visual_feat = self.feature_extractor(visual_input).last_hidden_state  # [B, C, H, W] -> [B, N, C]
+        # visual_feat = self.mlp(visual_feat)  # Project to condition_dim
+        return visual_feat
+
     @torch.no_grad()
-    def encode_text(self, text):
+    def encode_text(self, text, use_sentence=False):
         text_condition = self.tokenizer(text, return_tensors="pt", padding="max_length", truncation=True, max_length=20).to(self.device)
-        text_condition = self.text_encoder(**text_condition, return_dict=False)[0]
-        # text_condition.unsqueeze_(1)  # Add a sequence length dimension
-        # print(f"Text condition shape: {text_condition.shape}")
-        # exit(0)
+        text_condition = self.text_encoder(**text_condition, return_dict=False)
+        if self.use_text_sentence or use_sentence:
+            text_condition = text_condition[1].unsqueeze(1)  # Use the sentence embedding
+        else:
+            text_condition = text_condition[0]
         return text_condition
 
     def forward(self, batch_data, **kwargs):
@@ -206,40 +173,32 @@ class LatentMotionEstimation(nn.Module):
 
         # Prepare ground truth flow
         gt_rgb_flow = self.gen_flow(batch_data[self.input_type])
-        if not self.flow_to_rgb:
-            add = gt_rgb_flow.mean(dim=1, keepdim=True)
-            gt_rgb_flow = torch.cat([gt_rgb_flow, add], dim=1)
+        
         norm_gt_rgb_flow = gt_rgb_flow * 2 - 1 # Normalize the flow to [-1, 1]
         # Prepare target latents
         # with torch.amp.autocast(enabled=False, device_type=self.device.type):
-        latents = self.vae.encode(norm_gt_rgb_flow).latent_dist.sample()
+
+        # norm_gt_rgb_flow = norm_gt_rgb_flow[:, -1]
+        latents = self.vae.encode(norm_gt_rgb_flow[:, -1]).latent_dist.sample()
         latents = latents * self.vae.config.scaling_factor  # Scale the latents
 
         # Prepare condition embeddings
-        image = self.pipeline.image_processor.preprocess(batch_data[self.input_type][:, 0])
+        # image = self.image_processor.preprocess(batch_data[self.input_type][:, -2])
+        image = batch_data[self.input_type][:, -2] * 2 - 1  # Normalize the image to [-1, 1]
         # with torch.amp.autocast(enabled=False):
         image_latents = self.vae.encode(image).latent_dist.sample()
         image_latents = image_latents * self.vae.config.scaling_factor  # Scale the latents
         
         text = batch_data["language"]
-        if self.use_cfg:
-            random_p = torch.rand(bsz, device=latents.device)
-            prompt_mask = (random_p < 0.1).reshape(bsz, 1, 1)
-            text = [text[i] if not prompt_mask[i] else "" for i in range(bsz)]
-
         text_condition = self.encode_text(text)
-        
+
+        support_embed = self.get_support_embedding(batch_data)
+        if support_embed is not None:
+            text_condition = torch.cat([text_condition, support_embed], dim=1)  # Concatenate along the sequence length dimension
+
         if self.use_interval:
             interval_embed = self.interval_embed(batch_data["skip_frame"]).unsqueeze(1)  # Shape: (bsz, 1, condition_dim)
-            if self.use_cfg:
-                interval_embed[prompt_mask]
             text_condition = torch.cat([interval_embed, text_condition], dim=1)  # Concatenate along the sequence length dimension
-        # if self.use_cfg:
-        #     random_p = torch.rand(bsz, device=latents.device)
-        #     prompt_mask = (random_p < 0.1).view(-1, 1, 1)
-        #     unconditional_text_embeddings = self.uncond_text.unsqueeze(0).repeat(bsz, 1, 1)
-        #     text_condition = 
-        # logger.info(f"Text condition shape: {text_condition.shape}, Image latents shape: {image_latents.shape}, Latents shape: {latents.shape}")
         
         # Prepare noise
         bs = latents.shape[0]
@@ -249,99 +208,129 @@ class LatentMotionEstimation(nn.Module):
         noise = torch.randn(latents.shape, device=latents.device)
 
         noisy_latent = self.noise_scheduler.add_noise(latents, noise, timesteps)
-        model_inputs = [noisy_latent, image_latents]
 
+        model_inputs = [noisy_latent, image_latents]
+        use_prev = True # random.random() < 0.5
+        if self.use_prev_flow:
+            if use_prev:
+                # Prepare ground truth flow
+                data_prev = torch.stack([batch_data[self.input_type][:, -2], batch_data[self.input_type][:, -3]], dim=1) 
+                flow_prev = self.gen_flow(data_prev)
+                
+                flow_prev = flow_prev * 2 - 1 # Normalize the flow to [-1, 1]
+                
+                # norm_gt_rgb_flow = norm_gt_rgb_flow[:, -1]
+                latents_prev = self.vae.encode(flow_prev[:, -1]).latent_dist.sample()
+                latents_prev = latents_prev * self.vae.config.scaling_factor  # Scale the latents
+            else:
+                latents_prev = torch.zeros_like(latents)
+            model_inputs.append(latents_prev)
+
+        if self.use_prev_img:
+            if use_prev:
+                image_prev = batch_data[self.input_type][:, -3] * 2 - 1  # Normalize the image to [-1, 1]
+                # with torch.amp.autocast(enabled=False):
+                image_latents_prev = self.vae.encode(image_prev).latent_dist.sample()
+                image_latents_prev = image_latents * self.vae.config.scaling_factor  # Scale the latents
+            else:
+                image_latents_prev = torch.zeros_like(image_latents)
+            model_inputs.append(image_latents_prev)
+        
+            
         model_inputs = torch.concat(model_inputs, dim=1)  # Concatenate the noisy latents and image latents
 
         noise_pred = self.unet(model_inputs, timesteps, text_condition, return_dict=False)[0]
         
         loss = F.mse_loss(noise_pred, noise)
-
         outputs = { "diffu_loss": loss }
-
-        # if self.use_reconstruct_loss:
-        #     model_output = noise_pred
-        #     sample = noisy_latent
-        #     alpha_prod_t = self.noise_scheduler.alphas_cumprod[timesteps].view(-1, 1, 1, 1)
-        #     beta_prod_t = 1 - alpha_prod_t
-        #     pred_original_sample = (sample - beta_prod_t ** (0.5) * model_output) / alpha_prod_t ** (0.5)
-                
-        #     # 4. Clip or threshold "predicted x_0"
-        #     if self.noise_scheduler.config.clip_sample:
-        #         pred_original_sample = pred_original_sample.clamp(
-        #             -self.noise_scheduler.config.clip_sample_range, self.noise_scheduler.config.clip_sample_range
-        #         )
-
-        #     pred_latent = pred_original_sample
-
-            # pred_latent = self.noise_scheduler.step(
-            #     noise_pred, # model_output
-            #     timesteps,  # timestep
-            #     noisy_latent, # sample
-            # ).pred_original_sample
-            
-            # recon_flow = self.vae.decode(pred_latent / self.vae.config.scaling_factor).sample
-            # recon_flow = (recon_flow / 2 + 0.5).clamp(0, 1)  # Scale back to [0, 1]
-            # recon_loss = F.mse_loss(recon_flow, gt_rgb_flow)
-            # outputs["recon_loss"] = recon_loss * 5
-
         outputs["total_loss"] = sum([v for k, v in outputs.items() if "loss" in k])
 
         return outputs
-   
+    
+    def get_support_embedding(self, batch_data):
+        if len(self.support_types) == 0:
+            return None
+        
+        support_embed = []
+        for support_type in self.support_types:
+            if support_type not in batch_data:
+                continue
+            support_image = batch_data[support_type][:, -2] * 2 - 1
+            support_feat = self.encode_image(support_image)
+            support_embed.append(support_feat)
+        
+        if len(support_embed) == 0:
+            return None
+        return torch.cat(support_embed, dim=1)
+
     def forward_eval(self, batch_data, inference_step=None, **kwargs):
         if inference_step is not None:
             self.noise_scheduler.set_timesteps(inference_step)
-            
+        
+        bsz = batch_data[self.input_type].shape[0]
         # Prepare ground truth flow
         gt_rgb_flow = self.gen_flow(batch_data[self.input_type])
+        norm_gt_rgb_flow = gt_rgb_flow * 2 - 1 # Normalize the flow to [-1, 1]
 
-        # if not self.flow_to_rgb:
-        #     add = gt_rgb_flow.mean(dim=1, keepdim=True)
-        #     gt_rgb_flow = torch.cat([gt_rgb_flow, add], dim=1)
-        # norm_gt_rgb_flow = gt_rgb_flow * 2 - 1 # Normalize the flow to [-1, 1]
         # # Prepare target latents
         # # with torch.amp.autocast(enabled=False, device_type=self.device.type):
         # latents = self.vae.encode(norm_gt_rgb_flow).latent_dist.sample()
         # latents = latents * self.vae.config.scaling_factor  # Scale the latents
 
         # image = batch_data[self.input_type][:, 0]
-        image = self.pipeline.image_processor.preprocess(batch_data[self.input_type][:, 0])
+        image = batch_data[self.input_type][:, -2] * 2 - 1  # Normalize the image to [-1, 1]
         image_latents = self.vae.encode(image).latent_dist.sample()
         image_latents = image_latents * self.vae.config.scaling_factor  # Scale the latents
 
         #         
         text = batch_data["language"]
-        text_condition = self.encode_text(text)
+        text_embed = self.encode_text(text)
+        text_condition = text_embed
+    
+        support_embed = self.get_support_embedding(batch_data)
+        if support_embed is not None:
+            text_condition = torch.cat([text_condition, support_embed], dim=1)  # Concatenate along the sequence length dimension
 
         if self.use_interval:
             interval_embed = self.interval_embed(batch_data["skip_frame"]).unsqueeze(1)
             text_condition = torch.cat([interval_embed, text_condition], dim=1)  # Concatenate along the sequence length dimension
 
-        if self.use_cfg:
-            unconditional_text_embeddings = self.encode_text([""]).repeat(image_latents.shape[0], 1, 1)
-            if self.use_interval:
-                unconditional_text_embeddings = torch.cat([interval_embed, unconditional_text_embeddings], dim=1)
-            text_condition = torch.cat([unconditional_text_embeddings, text_condition])
-        # 
-
         latents = torch.randn(image_latents.shape, device=image_latents.device)
+        model_inputs = [image_latents]
+        use_prev = random.random() < 0.5
+        if self.use_prev_flow:
+            if use_prev:
+                # Prepare ground truth flow
+                data_prev = torch.stack([batch_data[self.input_type][:, -2], batch_data[self.input_type][:, -3]], dim=1) 
+                flow_prev = self.gen_flow(data_prev)
+                
+                flow_prev = flow_prev * 2 - 1 # Normalize the flow to [-1, 1]
+                
+                # norm_gt_rgb_flow = norm_gt_rgb_flow[:, -1]
+                latents_prev = self.vae.encode(flow_prev[:, -1]).latent_dist.sample()
+                latents_prev = latents_prev * self.vae.config.scaling_factor  # Scale the latents
+            else:
+                latents_prev = torch.zeros_like(latents)
+            model_inputs.append(latents_prev)
+            
+        if self.use_prev_img:
+            if use_prev:
+                image_prev = batch_data[self.input_type][:, -3] * 2 - 1  # Normalize the image to [-1, 1]
+                # with torch.amp.autocast(enabled=False):
+                image_latents_prev = self.vae.encode(image_prev).latent_dist.sample()
+                image_latents_prev = image_latents * self.vae.config.scaling_factor  # Scale the latents
+            else:
+                image_latents_prev = torch.zeros_like(image_latents)
+            model_inputs.append(image_latents_prev)
+        
+        # self.generator = torch.Generator(device=self.device).manual_seed(0)
         # Iterate through DDIM timesteps
         for t in self.noise_scheduler.timesteps:
             # Prepare the model inputs
-            model_input = torch.concat([latents, image_latents], dim=1)
-            
-            if self.use_cfg:
-                model_input = torch.cat([model_input] * 2)
+            model_input = torch.concat([latents] + model_inputs, dim=1)
 
             time_step = torch.ones(model_input.shape[0], dtype=torch.int64, device=latents.device) * t
             predicted_noise = self.unet(model_input, time_step, text_condition, return_dict=False)[0]
-
-            if self.use_cfg:
-                noise_pred_uncond, noise_pred_text = predicted_noise.chunk(2)
-                # Apply Classifier-Free Guidance formula
-                # This blends the predictions based on the guidance_scale
-                predicted_noise = noise_pred_uncond + self.guidance_scale * (noise_pred_text - noise_pred_uncond)
 
             # Update the latent based on DDIM step
             latents = self.noise_scheduler.step(predicted_noise, t, latents).prev_sample
@@ -351,51 +340,28 @@ class LatentMotionEstimation(nn.Module):
         generated_flow = self.vae.decode(latents).sample
         generated_flow = (generated_flow / 2 + 0.5).clamp(0, 1)  # Scale back to [0, 1]
 
-        if not self.flow_to_rgb:
-            generated_flow = generated_flow[:, :2]  # Keep only the first two channels for flow
-            gt_rgb_flow = gt_rgb_flow[:, :2]  # Keep only the first two channels for ground truth flow
-        
-        # add = gt_rgb_flow.mean(dim=1, keepdim=True)
-        # flow = torch.cat([gt_rgb_flow, add], dim=1)
-        # flow = gt_rgb_flow
-        # flow = flow * 2 - 1 # Normalize the flow to [-1, 1]
-        # Prepare target latents
-        
-        # latents = self.vae.encode(flow).latent_dist.sample()
-        # latents = latents * self.vae.config.scaling_factor  # Scale the latents
-        
-        # generated_flow = self.vae.decode(latents).sample
-        # generated_flow = (generated_flow / 2 + 0.5).clamp(0, 1)  # Scale back to [0, 1]
+        gt_rgb_flow = gt_rgb_flow[:, -1]
 
-
-        # generated_flow = self.pipeline(
-        #     image=image,
-        #     prompt_embeds=text_condition,
-        #     num_inference_steps=self.num_inference_steps,
-        #     image_guidance_scale=1.5,
-        #     guidance_scale=7,
-        #     generator=self.generator,
-        #     output_type="pt",
-        # ).images
-
-        # print(generated_flow.shape, generated_flow.min(), generated_flow.max())
-        # generated_flow = generated_flow[:, :2]
-        # exit(0)
-
-
-        outputs = {
-            "generated_flow": generated_flow,
-            "gt_flow": gt_rgb_flow,
-            "visual_input": image,
-        }
         
         with torch.no_grad():
             loss = torch.mean((generated_flow - gt_rgb_flow).abs())
-
+        
+        outputs = {}
+        outputs["use_prev"] = use_prev
         outputs["mse_loss"] = F.mse_loss(generated_flow, gt_rgb_flow)
         outputs["l1_loss"] = loss
         outputs["total_loss"] = outputs["mse_loss"] + outputs["l1_loss"]
 
+        if not self.flow_to_rgb:
+            generated_flow = generated_flow[:, :2]  # Keep only the first two channels for flow
+            gt_rgb_flow = gt_rgb_flow[:, :2]  # Keep only the first two channels for ground truth flow
+        
+        outputs.update({
+            "generated_flow": generated_flow,
+            "gt_flow": gt_rgb_flow,
+            "visual_input": image,
+        })
+        
         return outputs
 
     def visualize(self, batch_data, outputs, inference=False):
@@ -405,22 +371,29 @@ class LatentMotionEstimation(nn.Module):
         from .flow_utils import visualize_flow_vectors_as_PIL, FlowNormalizer
         
         generated_flow = outputs["generated_flow"]
-        images = batch_data[self.input_type][:, 0]
+        images = batch_data[self.input_type][:, -2]
         goals = batch_data[self.input_type][:, -1]
+
+        support_images = []
+        if len(self.support_types):
+            for support_type in self.support_types:
+                if support_type in batch_data:
+                    img = batch_data[support_type][:, -2]
+                    img = (img.permute(0, 2, 3, 1).cpu().numpy() * 255).astype(np.uint8)
+                    support_images.append(img)
+            
         text = batch_data["language"]
         
         if not inference:
-            gt_rgb_flow = self.gen_flow(batch_data[self.input_type])
+            gt_rgb_flow = outputs["gt_flow"]
         else:
             gt_rgb_flow = torch.zeros_like(generated_flow) + 0.5  
 
-        loss = ((gt_rgb_flow - generated_flow) ** 2).mean(dim=[1, 2, 3]) * 1000
-        logger.info(f"{generated_flow.shape}, {gt_rgb_flow.shape} {loss}")  
-
         if self.flow_to_rgb:
             generated_flow = (generated_flow * 255).to(torch.uint8)
-            gt_rgb_flow = (gt_rgb_flow * 255).to(torch.uint8)      
+            gt_rgb_flow = (gt_rgb_flow * 255).to(torch.uint8)        
     
+        loss = ((gt_rgb_flow - generated_flow) ** 2).mean(dim=[1, 2, 3]) * 1000
         # Convert to numpy for visualization
         images_np = (images.permute(0, 2, 3, 1).cpu().numpy() * 255).astype(np.uint8)
         goals_np = (goals.permute(0, 2, 3, 1).cpu().numpy() * 255).astype(np.uint8)
@@ -435,6 +408,9 @@ class LatentMotionEstimation(nn.Module):
                 goal = visualize_flow_vectors_as_PIL(goals_np[i], None, 
                     title=f"Interval = {batch_data['skip_frame'][i]}, Loss x 1K = {loss[i].item():.4f}"
                 )
+                support = [visualize_flow_vectors_as_PIL(support_images[j][i], None, 
+                    title=f"Support {j}: {self.support_types[j]}") 
+                            for j in range(len(support_images))]
                 normalizer = FlowNormalizer(self.image_size, self.image_size)
                 gt_flow = normalizer.unnormalize(gt_rgb_flow_np[i])
                 gt = visualize_flow_vectors_as_PIL(images_np[i], gt_flow, step=4, title="Ground Truth Optical Flow")
@@ -450,9 +426,9 @@ class LatentMotionEstimation(nn.Module):
                 img = np.array(generated.convert("RGB"))
                 images.append(img)
             else:
-                grid = make_image_grid([img, goal, gt, generated],
+                grid = make_image_grid([img, goal, *support, gt, generated, *support],
                     rows = 2,
-                    cols = 2,
+                    cols = 2 + len(support_images),
                 )
                     
                 images.append(
