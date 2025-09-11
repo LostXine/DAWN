@@ -9,8 +9,8 @@ logger = logging.getLogger(__name__)
 
 def setup_logging(is_main_process: bool = True, device: str="0", log_dir: str = 'outputs/') -> None:
     """Setup logging according to `training_args`."""
-    install()
-
+    # pass
+    # install()
     os.makedirs(log_dir, exist_ok=True)
     log_file = open(os.path.join(log_dir, f"log_{device}.ansi"), "w")
     console_file = Console(file=log_file, force_terminal=True, width=180, record=True, stderr=True)

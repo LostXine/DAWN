@@ -1,0 +1,16 @@
+_target_: dawn.models.system2.sd_video.SDVideoMotion
+pretrained: stable-diffusion-v1-5/stable-diffusion-v1-5
+flow_to_rgb: False
+use_cfg: False
+use_interval: False
+num_inference_steps: 25
+input_type: rgb_static
+support_types: [ ]
+use_text_sentence: False
+num_frames: 4
+# use_reconstruct_loss: True
+# image_size: 256
+# in_channels: 7
+# out_channels: 2
+# condition_dim: 512
+# size: "B"

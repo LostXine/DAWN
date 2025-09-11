@@ -32,7 +32,7 @@ class Trainer:
 
         self.cur_step = 0        
         self.load_checkpoint(checkpoint_path)
-        self.model.load_weights()
+        # self.model.load_weights()
     
         # Prepare the model and optimizer with the accelerator
         logger.info(f"Preparing model and optimizer with {self.accelerator.__class__.__name__}.")

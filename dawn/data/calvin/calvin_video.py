@@ -12,9 +12,16 @@ import albumentations as A
 from albumentations.pytorch import ToTensorV2
 from omegaconf  import OmegaConf
 import numpy as np
+from tqdm.auto import tqdm
+import cv2
+import time
+from functools import lru_cache
+from torch.utils.data import Dataset
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from PIL import Image
 
-import sys
-sys.path.append("/home/nero/Robotics/DAWN/")
+# import sys
+# sys.path.append("/home/nero/Robotics/DAWN/")
 
 from torch.utils.data import Dataset
 from dawn.data.base_dataset import BaseDataset
@@ -22,15 +29,15 @@ from dawn.data.base_dataset import BaseDataset
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(name)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-class CalvinDataset(BaseDataset):
+class CalvinVideoDataset(BaseDataset):
     def __init__(self, 
         data_path, 
         split="training", 
         image_size=256,
         num_frames=2,
         num_actions=10,
-        min_skip=10, #5,
-        max_skip=30, #30,
+        min_skip=5, #5,
+        max_skip=10, #30,
         observation_type: List[str] = ["rgb_static", "rgb_gripper"],  # Default observation types
         **kwargs
     ):
@@ -55,68 +62,66 @@ class CalvinDataset(BaseDataset):
         action = torch.tensor(metadata["rel_actions"][frame_idx: frame_idx + self.num_actions])
         
         return action
-    # def __len__(self):
-    #     if self.split == "training":
-    #         return len(self.episodes) * 1000
-        
-    #     return len(self.episodes)
+
     
-    # def __getitem__(self, idx):
-    #     idx = idx % len(self.episodes)
-    #     return super().__getitem__(idx)
-    
-    # def _load_episodes(self):    
-    #     episodes = super()._load_episodes()
-    #     for episode in episodes:
-    #         metadata = episode["metadata"]
-    #         episode["metadata"]["task"] = self.r_map[metadata["language"]]
-    #     return episodes
-
-    # def __getitem__(self, idx):
-    #     # idx=0
-    #     # idx = 0
-    #     episode = self.episodes[idx]
-    #     metadata = episode["metadata"]
-
-    #     # Augment the language in the same task
-    #     language = random.choice(self.annos[metadata["task"]])
-    #     data = {
-    #         "idx": episode["idx"],
-    #         "language": language # metadata["language"],
-    #         # "language_embedding": torch.tensor(metadata["language_embedding"], dtype=torch.float32),
-    #     }
-    #     frames = [random.choice(range(metadata["length"]))]
-    #     skips = []
-    #     while len(frames) < self.num_frames:
-    #         skip = random.randint(self.min_skip, self.max_skip)
-    #         next_idx = min(metadata["length"] - 1, frames[-1] + skip)
-    #         frames.append(next_idx)
-    #         skips.append(skip)
-    #     frame_idx = frames[-2]
-    #     # frame_idx = random.choice(range(metadata["length"]))
-    #     # frame_idx = 0
-    #     data["action"] = torch.tensor(metadata["rel_actions"][frame_idx: frame_idx + self.num_actions])
-    #     # Pad actions if they are less than num_actions
-    #     if len(data["action"]) < self.num_actions:
-    #         pad_length = self.num_actions - len(data["action"])
-    #         last_action = data["action"][-1:]
-    #         data["action"] = torch.cat([data["action"], last_action.repeat(pad_length, 1)], dim=0)
-    #         # data["action"] = torch.cat([data["action"], torch.zeros((pad_length, data["action"].shape[1]), dtype=torch.float32)], dim=0)
+    def __getitem__(self, idx):
+        # first_frame, episode = self.episodes[idx]
+        episode = self.episodes[idx]
+        first_frame = None
         
-    #     # next_idx = min(metadata["length"] - 1, frame_idx + self.num_actions)
-    #     # skip = random.randint(self.min_skip, self.max_skip)
-    #     # next_idx = min(metadata["length"] - 1, frame_idx + skip)
+        metadata = self._load_metadata(episode)
 
-    #     skip = skips[-1]
-    #     data["skip_frame"] = torch.tensor(skip, dtype=torch.int64)
+        # Augment the language in the same task
+        try:
+            if "task" not in metadata:
+                metadata["task"] = self.r_map[metadata["language"]]
+            language = random.choice(self.annos[metadata["task"]])
+        except:
+            if isinstance(metadata["language"], list):
+                language = random.choice(metadata["language"])
+            else:
+                language = metadata["language"]
 
-    #     for obs_type in self.observation_type:
-    #         obs_files = sorted(glob.glob(os.path.join(episode["path"], obs_type, '*.jpg')))
-    #         images = np.stack([imageio.imread(obs_files[idx]) for idx in frames], axis=0)
-    #         data[obs_type] = self.transform(images=images)["images"] / 255.
-    #         # data[obs_type] = torch.stack([self.transform(image=)["image"] ]) / 255. 
-    #     return data
+        data = {
+            "idx": episode["idx"],
+            "language": language 
+        }
+        
+        frames, skips = self.get_frame_indices(metadata, first_frame=first_frame)
 
+        frame_idx = frames[0]
+        data["action"] = self.get_action(metadata, frame_idx)
+
+        # Pad actions if they are less than num_actions 
+        if len(data["action"]) < self.num_actions:
+            pad_length = self.num_actions - len(data["action"])
+            last_action = data["action"][-1:]
+            data["action"] = torch.cat([data["action"], last_action.repeat(pad_length, 1)], dim=0)
+            # data["action"] = torch.cat([data["action"], torch.zeros((pad_length, data["action"].shape[1]), dtype=torch.float32)], dim=0)
+        
+        # if abs(data["action"][:, :6]).mean() < 0.05 and data["action"][:, 6].min() == data["action"][:, 6].max():
+        #     return self.__getitem__(random.randint(0, self.__len__() - 1))
+        # print(episode["path"], data["action"].shape)
+        skip = skips[-1]
+        data["skip_frame"] = torch.tensor(skip, dtype=torch.int64)
+        data["frame_idx"] = torch.tensor(frames)
+
+        for obs_type, obs_from in zip(self.observation_type, self.observation_from):
+            stime = time.time()
+            if obs_type not in episode:
+                if "frames" in metadata:
+                    obs_files = [os.path.join(episode["path"], obs_from, x) for x in metadata["frames"]]
+                else:
+                    obs_files = sorted(glob.glob(os.path.join(episode["path"], obs_type, '*')))
+                images = np.stack([self.read_image(obs_files[i]) for i in frames], axis=0)
+            else:
+                images = episode[obs_type][frames]
+            etime = time.time()
+            # logger.info(f"Loading {obs_type} took {etime - stime:.2f} seconds")
+            data[obs_type] = self.transform(images=images)["images"] / 255.
+            # logger.info(f"{episode["path"]}, {frames}")
+
+        return data
 if __name__ == "__main__":
     dataset = CalvinDataset(
         data_path="/home/nero/Robotics/DAWN/data/realsense", 

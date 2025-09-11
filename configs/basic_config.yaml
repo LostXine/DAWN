@@ -31,7 +31,7 @@ trainer:
   val_interval: 500
   save_dir: '${save_dir}/${project}/${now:%Y-%m-%d_%H-%M}'
   resume: ${resume}
-  lr_warmup_steps: 500
+  lr_warmup_steps: 10
   
 optimizer:
   _target_: 'torch.optim.AdamW'

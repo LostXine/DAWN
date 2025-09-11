@@ -1,6 +1,10 @@
 import torch
 import logging
 from humanfriendly import format_size
+from dawn.models.modules.diffusion.feature_extraction import Diffusion_feature_extractor
+from dawn.models.modules.transformers.video_former import Video_Former_3D
+import einops
+
 import random
 import os
 logger = logging.getLogger(__name__)
@@ -11,9 +15,30 @@ class ImagineToAct(torch.nn.Module):
 
         logger.info(f"Initializing {__class__.__name__}.")
         self.imagine_model = imagine_model
-
         self.action_model = action_model
+
+        self.use_all_layer = True
+        model = imagine_model
+        self.tvp_encoder = Diffusion_feature_extractor(pipeline=model.pipeline)
         
+        self.extract_layer_idx = extract_layer_idx = 1
+        condition_dim_list = [1280,1280,1280,640]
+        sum_dim = 0
+        for i in range(extract_layer_idx+1):
+            sum_dim = sum_dim + condition_dim_list[i+1]
+        condition_dim = 1024 # condition_dim_list[extract_layer_idx+1] if not self.use_all_layer else sum_dim
+        # print(condition_dim)
+        
+        self.video_former = Video_Former_3D(
+            dim=384,
+            depth=6,
+            # condition_dim=1024,
+            num_frame=4,
+            num_time_embeds=4,
+            num_latents=224,
+            condition_dim=condition_dim,
+
+        )
         self.imagine_model_weights = imagine_model_weights
         self.use_flow = use_flow
         self.input_type = imagine_model.input_type
@@ -25,7 +50,7 @@ class ImagineToAct(torch.nn.Module):
         total_trainable_params = sum(p.numel() for p in self.parameters() if p.requires_grad)
         logger.info(f"Total parameters: {format_size(total_params)}, Trainable parameters: {format_size(total_trainable_params)}")
 
-        self.load_weights()
+        # self.load_weights()
         self.reset()
 
     def reset(self):
@@ -44,50 +69,22 @@ class ImagineToAct(torch.nn.Module):
         imagined_output = None
         with torch.no_grad():
             self.imagine_model.eval()
-            if not self.use_flow:
-                b, t, c, h, w = batch_data[self.input_type].shape
-                norm_flow = torch.zeros((b, 2, h, w), device=batch_data[self.input_type].device)
-                flow = norm_flow 
-            else:
-            # if not self.training or random.random() < 0.5:
-                if split != "train" or gen_flow or random.random() < 0.0:
-                    # print("?????")
-                    imagined_output = self.imagine_model(batch_data, **kwargs)
-                    flow = imagined_output["generated_flow"]
-                else:
-                    flow = self.imagine_model.gen_flow(batch_data[self.input_type])[:, -1]
-                    # Add some noise to the flow to adapt with the generated flow 
-                    noise = torch.randn_like(flow) / self.imagine_model.image_size / 2
-                    p = torch.rand(flow.shape[0], device=flow.device) < 0.5
-                    flow = flow + noise * p[:, None, None, None]  # Add noise only to some samples
-                
-                norm_flow = flow * 2 - 1 
+            b, t, c, h, w = batch_data[self.input_type].shape
+            norm_flow = torch.zeros((b, 2, h, w), device=batch_data[self.input_type].device)
+            flow = norm_flow 
 
-            norm_rgb = batch_data[self.input_type][:, 0]
-            visual_input = torch.cat([
-                norm_rgb,
-                norm_flow
-            ], dim=1)
-
-            visual_input2 = torch.cat([
-                batch_data["rgb_gripper"][:, 0], 
-                torch.zeros_like(norm_flow, device=norm_flow.device)
-            ], dim=1)
-
-            # visual_input2 = self.imagine_model.encode_image(batch_data["rgb_gripper"][:, 0])
-            visual_input = torch.cat([visual_input, visual_input2], dim=0)
-            # goal = self.imagine_model.encode_text(batch_data["language"], use_sentence=True)
-            # logger.info(batch_data["language"])
             goal = self.imagine_model.encode_text(batch_data["language"])
+            imgs = norm_rgb = batch_data[self.input_type][:, :1]
+            perceptual_features = self.tvp_encoder(imgs, goal, self.imagine_model.num_inference_steps, self.extract_layer_idx)
+            perceptual_features = einops.rearrange(perceptual_features, 'b f c h w-> b f c (h w)')
+            perceptual_features = einops.rearrange(perceptual_features, 'b f c l-> b f l c')
 
+            print(goal.shape, perceptual_features.shape)
+            visual_input = self.video_former(perceptual_features) 
             x = {
                 "visual_input": visual_input,
-                # "visual_input2": visual_input2,
                 "lang_goal": goal,
             }
-                
-            # print(imagined_output["feats"].shape)
-            # visual_input = imagined_output["feats"]
         
         # Action 
         return_dict = self.action_model(
@@ -103,10 +100,6 @@ class ImagineToAct(torch.nn.Module):
             "action_logits": return_dict["logits"] if "logits" in return_dict else None,
         })
 
-
-        # print(return_dict.keys())
-        # logger.info(f"GT action: {batch_data['action'][0, 0]}")
-        # logger.info(f"PD action: {loss['logits'][0, 0]}")
         return return_dict
 
     @torch.no_grad()

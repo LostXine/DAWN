@@ -1,0 +1,17 @@
+_target_: dawn.models.system2.sdxl.MotionSDXL
+pretrained: stabilityai/stable-diffusion-xl-base-1.0
+flow_to_rgb: False
+use_cfg: False
+use_interval: True
+num_inference_steps: 25
+input_type: rgb_static
+support_types: [] #["rgb_gripper", ]
+use_text_sentence: False
+conditioning_dropout_prob: 0.1
+
+# use_reconstruct_loss: True
+# image_size: 256
+# in_channels: 7
+# out_channels: 2
+# condition_dim: 512
+# size: "B"

@@ -1,27 +1,30 @@
-_target_: dawn.models.arch.LTM_latent.ImagineToAct
+_target_: dawn.models.arch.VPP.ImagineToAct
 # _target_: dawn.models.system1.raft.RAFT
 
 imagine_model: 
-      _target_: dawn.models.system2.ldm_support.LatentMotionEstimation
-      image_size: 256
-      num_inference_steps: 25
+      _target_: dawn.models.system2.svd.SDVideoMotion
+      pretrained: stable-diffusion-v1-5/stable-diffusion-v1-5
       flow_to_rgb: False
       use_cfg: False
-      use_interval: True
+      use_interval: False
+      num_inference_steps: 25
       input_type: rgb_static
-      support_types: ["rgb_gripper", ]
+      support_types: [ ]
       use_text_sentence: False
+      num_frames: 4
+      condition_dim: 1024
 
 action_model: 
       _target_: dawn.models.system1.tdp.TransformerDiffusionPolicy
       # image_size: 256
       in_channels: 5
-      obs_dim: 768
-      goal_dim: 768
+      obs_dim: 384
+      goal_dim: 1024
       num_latents: 257
       num_sampling_steps: 10
 
-imagine_model_weights: ./outputs/DAWN_stage_1/2025-07-06_13-10-37/checkpoints/model_0200000.pth
+# imagine_model_weights: ./outputs/DAWN_stage_1/2025-07-06_13-10-37/checkpoints/model_0200000.pth
+# outputs/DAWN_stage_1/2025-07-18_05-04/checkpoints/model_0100000.pth
 # ./outputs/DAWN_stage_1/2025-07-09_14-18-27/checkpoints/model_0100000.pth
 # ./outputs/DAWN_stage_1/2025-07-06_13-10-37/checkpoints/model_0200000.pth
 #./outputs/DAWN_stage_1/2025-06-26_16-41-53/checkpoints/model_0050000.pth

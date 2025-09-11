@@ -62,7 +62,7 @@ def main(cfg: DictConfig = None):
     val_loader = DataLoader(
         val_dataset,
         batch_size=cfg.loader.val_batch_size,
-        shuffle=True,
+        shuffle=False,
         num_workers=2,#cfg.loader.num_workers,
         pin_memory=True,
         # prefetch_factor=0,

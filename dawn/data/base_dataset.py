@@ -20,6 +20,9 @@ from torch.utils.data import Dataset
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from PIL import Image
 
+# from torchvision.models import optical_flow
+# from torchvision.utils import flow_to_image
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(name)s - %(message)s")
 logger = logging.getLogger(__name__)
 
@@ -56,15 +59,20 @@ class BaseDataset(Dataset):
         self.episodes = self._load_episodes()
         self.transform = self._get_transform()
 
+
+        # self.flow_model = optical_flow.raft_large(weights=optical_flow.Raft_Large_Weights.DEFAULT, progress=False).eval()
+        # self.flow_model.requires_grad_(False)
+        # self.flow_transform = optical_flow.Raft_Large_Weights.DEFAULT.transforms()
+        
         logger.info(f"Loading from {data_path} takes {timer.seconds():.2f} seconds.")
 
     def _get_transform(self):
         if self.split == "training":
             return A.Compose([
-                A.Affine(scale=(0.8, 1.2), rotate=(-15, 15),
-                    translate_percent=(-0.1, 0.1), shear=(-10, 10), p=0.5),
+                # A.Affine(scale=(0.8, 1.2), rotate=(-15, 15),
+                #     translate_percent=(-0.1, 0.1), shear=(-10, 10), p=0.5),
                 A.Resize(self.image_size, self.image_size),
-                A.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1, p=0.5),
+                A.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1, hue=0.1, p=0.5),
                 ToTensorV2(),
             ])
         return A.Compose([
@@ -82,8 +90,20 @@ class BaseDataset(Dataset):
 
         if "frames" not in metadata:
             metadata["frames"] = sorted(os.listdir(os.path.join(episode["path"], self.observation_from[0])))
-            metadata["length"] = len(metadata["frames"])
+            metadata["frames"] = metadata["frames"][:metadata["length"]]
+            # metadata["length"] = len(metadata["frames"])
         
+        if "last_idx_same_gripper" not in metadata:
+            metadata["last_idx_same_gripper"] = [metadata["length"] - 1] * metadata["length"]
+            if "actions" in metadata:
+                for i in range(metadata["length"] - 2, -1, -1):
+                    if metadata["actions"][i][6] == metadata["actions"][i + 1][6]:
+                        metadata["last_idx_same_gripper"][i] = metadata["last_idx_same_gripper"][i + 1]
+                    else:
+                        metadata["last_idx_same_gripper"][i] = i
+                # for i in range(metadata["length"]):
+                #     print(i, metadata["last_idx_same_gripper"][i], metadata["actions"][i][6], torch.tensor(metadata["rel_actions"][i])[:6].abs().mean(), metadata["rel_actions"][i])
+                # print("----------")
         if self.cache_metadata:
             episode["metadata"] = metadata
         
@@ -137,12 +157,12 @@ class BaseDataset(Dataset):
         episodes = [self._load_single_episode(f) for f in tqdm(episode_files, desc="Loading episodes")]
         logger.info(f"Loaded {len(episodes)} episodes from {self.data_path}")
         # The list of episodes may not be in the original sorted order, so sort it now if needed.
-        episodes.sort(key=lambda x: x['idx'])
+        # episodes.sort(key=lambda x: x['idx'])
         return episodes
 
         data = []
         for episode in tqdm(episodes):
-            for i in range(episode["metadata"]["length"]):
+            for i in range(self._load_metadata(episode)["length"]):
                 data.append((i, episode))
         logger.info(f"Loaded {len(data)} frames from {self.data_path}")
         
@@ -190,13 +210,15 @@ class BaseDataset(Dataset):
         while len(frames) < self.num_frames:
             skip = random.randint(self.min_skip, self.max_skip)
             next_idx = min(metadata["length"] - 1, frames[-1] + skip)
+            # next_idx = min(next_idx, metadata["last_idx_same_gripper"][frames[-1]] + 1)
             frames.append(next_idx)
             skips.append(skip)
         return frames, skips
 
     def get_action(self, episode_metadata, frame_idx):
         metadata = episode_metadata
-        action = torch.tensor(metadata["rel_actions"][frame_idx: frame_idx + self.num_actions])
+        # action = torch.tensor(metadata["rel_actions"][frame_idx: frame_idx + self.num_actions])
+        action = torch.tensor(metadata["actions"][frame_idx: frame_idx + self.num_actions])
         
         return action
 
@@ -208,9 +230,9 @@ class BaseDataset(Dataset):
 
     def __getitem__(self, idx):
         # logger.info(f"Getting item {idx} from {self.split} split")
-        episode = self.episodes[idx]
-        first_frame = None
-        # first_frame, episode = self.episodes[idx]
+        # episode = self.episodes[idx]
+        first_frame, episode = self.episodes[idx]
+        # first_frame = None
         
         metadata = self._load_metadata(episode)
 
@@ -242,8 +264,12 @@ class BaseDataset(Dataset):
             data["action"] = torch.cat([data["action"], last_action.repeat(pad_length, 1)], dim=0)
             # data["action"] = torch.cat([data["action"], torch.zeros((pad_length, data["action"].shape[1]), dtype=torch.float32)], dim=0)
         
+        # if abs(data["action"][:, :6]).mean() < 0.05 and data["action"][:, 6].min() == data["action"][:, 6].max():
+        #     return self.__getitem__(random.randint(0, self.__len__() - 1))
+        # print(episode["path"], data["action"].shape)
         skip = skips[-1]
         data["skip_frame"] = torch.tensor(skip, dtype=torch.int64)
+        data["frame_idx"] = torch.tensor(frames)
 
         for obs_type, obs_from in zip(self.observation_type, self.observation_from):
             stime = time.time()
@@ -259,4 +285,5 @@ class BaseDataset(Dataset):
             # logger.info(f"Loading {obs_type} took {etime - stime:.2f} seconds")
             data[obs_type] = self.transform(images=images)["images"] / 255.
             # logger.info(f"{episode["path"]}, {frames}")
+
         return data

@@ -1,11 +1,11 @@
 train:  
   _target_: dawn.data.calvin.calvin.CalvinDataset
-  data_path: data/calvin/dataset_opt_local/task_ABC_D
+  data_path: data/realsense
   split: training 
-  num_frames: 2
+  num_frames: 3
 
 val:
   _target_: dawn.data.calvin.calvin.CalvinDataset
-  data_path: data/calvin/dataset_opt_local/task_ABC_D
+  data_path: data/realsense
   split: validation
-  num_frames: 2
+  num_frames: 3

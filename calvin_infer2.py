@@ -272,7 +272,7 @@ def rollout(env, model, task_oracle, cfg, idx, subtask, lang_embeddings, val_ann
             "rgb_static": torch.cat(history["rgb_static"][-3:], dim=1),
             "rgb_gripper": torch.cat(history["rgb_gripper"][-3:], dim=1),
             "language": lang_annotation, 
-            "skip_frame": torch.tensor(20).view(-1).to(device)
+            "skip_frame": torch.tensor(10).view(-1).to(device)
         }
         # action = torch.rand(7)
         # inputs = {
@@ -288,7 +288,7 @@ def rollout(env, model, task_oracle, cfg, idx, subtask, lang_embeddings, val_ann
         else:   
             action_output = model.step(inputs, visualize=cfg.inference.record_flow)
         etime= time.time()
-        logger.info(f"Inference time step {step}: {etime - stime:.2f}s")
+        # logger.info(f"Inference time step {step}: {etime - stime:.2f}s")
         total_time += etime - stime
         action = action_output["action"]
         viz_flow = action_output["viz_flow"]
@@ -408,7 +408,7 @@ def main(cfg):
                 
         else:
             logger.warning(f"Model weights file not found: {cfg.weights}. Skipping loading weights.")
-        model.load_weights()
+        # model.load_weights()
         # from diffusers import AutoencoderKL
         # vae = AutoencoderKL.from_pretrained("madebyollin/sdxl-vae-fp16-fix")
         # model.imagine_model.vae = vae

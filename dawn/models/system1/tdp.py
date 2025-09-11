@@ -358,9 +358,23 @@ class TransformerDiffusionPolicy(nn.Module):
 
         if labels is not None:
             # If labels are provided, compute the loss
+
             loss = self.criterion(act_seq.flatten(start_dim=1), labels.flatten(start_dim=1))
-            # print(f"GT: {labels.min()} {labels.max()} {labels.mean()}, loss: {loss.item()}")
             return_dict["loss"] = loss
+
+            trans_loss = F.mse_loss(act_seq[:, :3].flatten(start_dim=1), labels[:, :3].flatten(start_dim=1))
+            rot_loss = F.mse_loss(act_seq[:, 3:6].flatten(start_dim=1), labels[:, 3:6].flatten(start_dim=1))
+            gripper_loss = F.mse_loss(act_seq[:, 6].flatten(start_dim=1), labels[:, 6].flatten(start_dim=1))
+            l1_gripper_loss = F.l1_loss(act_seq[:, 6].flatten(start_dim=1), labels[:, 6].flatten(start_dim=1))
+            
+            return_dict.update({
+                "trans_loss": trans_loss,
+                "rot_loss": rot_loss,
+                "gripper_loss": gripper_loss,
+                "l1_gripper_loss": l1_gripper_loss,
+            })
+
+            # print(f"GT: {labels.min()} {labels.max()} {labels.mean()}, loss: {loss.item()}")
             # print(f"Loss: {loss:.04f}")
         
         # for a, g, l in zip(act_seq, labels, self.criterion(act_seq.flatten(start_dim=1), labels.flatten(start_dim=1), reduction='none')):
