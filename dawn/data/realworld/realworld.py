@@ -30,36 +30,81 @@ class RealworldDataset(BaseDataset):
         max_skip=30,
         cache_metadata=True,
         observation_type: List[str] = ["rgb_static", "rgb_gripper"],  # Default observation types,
+        action_type="rel_actions",
         **kwargs
     ):
         self.data_path = os.path.join(data_path, "episodes")
-        super().__init__(data_path, split, image_size, num_frames, num_actions, min_skip, max_skip, cache_metadata, observation_type)
+        # Load task + language annotations
+        try:
+            self.annos = OmegaConf.load(os.path.join(data_path, "annotations.yaml"))
+            self.r_map = {}
+            for k, v in self.annos.items():
+                v.append(k.replace("_", " "))
+                for x in v:
+                    self.r_map[x] = k
+        except:
+            logger.warning("No annotations found, using default language annotations.")
 
-    def _get_transform(self):
-        if self.split == "training":
-            return A.Compose([
-                # A.PadIfNeeded(min_height=320, min_width=320, border_mode=0, value=0, mask_value=0),
-                # A.Affine(scale=(0.8, 1.2), rotate=(-15, 15),
-                #     translate_percent=(-0.1, 0.1), shear=(-10, 10), p=0.5),
-                A.Resize(self.image_size, self.image_size),
-                A.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1, p=0.5),
-                ToTensorV2(),
-            ])
-        return A.Compose([
-            # A.PadIfNeeded(min_height=320, min_width=320, border_mode=0, value=0, mask_value=0),
-            A.Resize(self.image_size, self.image_size),
-            ToTensorV2(),
-        ])
+        super().__init__(data_path, split, image_size, num_frames, num_actions, min_skip, max_skip, cache_metadata, observation_type, action_type=action_type)
+
 
     def __len__(self):
-        # if self.split == "training":
-        #     return len(self.episodes) * 1000
-        
         return len(self.episodes)
     
     def __getitem__(self, idx):
-        idx = idx % len(self.episodes)
-        return super().__getitem__(idx)
+        # logger.info(f"Getting item {idx} from {self.split} split")
+        episode = self.episodes[idx]
+        # first_frame, episode = self.episodes[idx]
+        first_frame = None
+        
+        metadata = self._load_metadata(episode)
+
+        # Augment the language in the same task
+        try:
+            if "task" not in metadata:
+                metadata["task"] = self.r_map[metadata["language"]]
+            language = random.choice(self.annos[metadata["task"]])
+        except:
+            if isinstance(metadata["language"], list):
+                language = random.choice(metadata["language"])
+            else:
+                language = metadata["language"]
+
+        data = {
+            "idx": episode["idx"],
+            "language": language 
+        }
+        
+        frames, skips = self.get_frame_indices(metadata, first_frame=first_frame)
+
+        frame_idx = frames[-2]
+        data["action"] = self.get_action(metadata, frame_idx)
+        data["robot_obs"] = self.get_robot_state(metadata, frame_idx)
+
+        # Pad actions if they are less than num_actions 
+        if len(data["action"]) < self.num_actions:
+            pad_length = self.num_actions - len(data["action"])
+            last_action = data["action"][-1:]
+            data["action"] = torch.cat([data["action"], last_action.repeat(pad_length, 1)], dim=0)
+        
+        skip = skips[-1]
+        data["skip_frame"] = torch.tensor(skip, dtype=torch.int64)
+        data["frame_idx"] = torch.tensor(frames)
+
+        for obs_type, obs_from in zip(self.observation_type, self.observation_from):
+            if obs_type not in episode:
+                if "frames" in metadata:
+                    obs_files = [os.path.join(episode["path"], obs_from, x) for x in metadata["frames"]]
+                else:
+                    obs_files = sorted(glob.glob(os.path.join(episode["path"], obs_type, '*')))
+                images = np.stack([self.read_image(obs_files[i]) for i in frames], axis=0)
+            else:
+                images = episode[obs_type][frames]
+            data[obs_type] = self.transform(images=images)["images"] / 255.
+            
+            if obs_type == "rgb_gripper":
+                data[obs_type] = torch.flip(data[obs_type], dims=[2, 3])  # Flip the gripper camera
+        return data
     
     def _load_metadata(self, episode):
         if "metadata" in episode:
@@ -73,48 +118,3 @@ class RealworldDataset(BaseDataset):
             episode["metadata"] = metadata
         
         return metadata
-
-    # def __getitem__(self, idx):
-    #     # idx=0
-    #     # idx = 0
-    #     episode = self.episodes[idx]
-    #     metadata = episode["metadata"]
-
-    #     # Augment the language in the same task
-    #     language = random.choice(self.annos[metadata["task"]])
-    #     data = {
-    #         "idx": episode["idx"],
-    #         "language": language # metadata["language"],
-    #         # "language_embedding": torch.tensor(metadata["language_embedding"], dtype=torch.float32),
-    #     }
-    #     frames = [random.choice(range(metadata["length"]))]
-    #     skips = []
-    #     while len(frames) < self.num_frames:
-    #         skip = random.randint(self.min_skip, self.max_skip)
-    #         next_idx = min(metadata["length"] - 1, frames[-1] + skip)
-    #         frames.append(next_idx)
-    #         skips.append(skip)
-    #     frame_idx = frames[-2]
-    #     # frame_idx = random.choice(range(metadata["length"]))
-    #     # frame_idx = 0
-    #     data["action"] = torch.tensor(metadata["rel_actions"][frame_idx: frame_idx + self.num_actions])
-    #     # Pad actions if they are less than num_actions
-    #     if len(data["action"]) < self.num_actions:
-    #         pad_length = self.num_actions - len(data["action"])
-    #         last_action = data["action"][-1:]
-    #         data["action"] = torch.cat([data["action"], last_action.repeat(pad_length, 1)], dim=0)
-    #         # data["action"] = torch.cat([data["action"], torch.zeros((pad_length, data["action"].shape[1]), dtype=torch.float32)], dim=0)
-        
-    #     # next_idx = min(metadata["length"] - 1, frame_idx + self.num_actions)
-    #     # skip = random.randint(self.min_skip, self.max_skip)
-    #     # next_idx = min(metadata["length"] - 1, frame_idx + skip)
-
-    #     skip = skips[-1]
-    #     data["skip_frame"] = torch.tensor(skip, dtype=torch.int64)
-
-    #     for obs_type in self.observation_type:
-    #         obs_files = sorted(glob.glob(os.path.join(episode["path"], obs_type, '*.jpg')))
-    #         images = np.stack([imageio.imread(obs_files[idx]) for idx in frames], axis=0)
-    #         data[obs_type] = self.transform(images=images)["images"] / 255.
-    #         # data[obs_type] = torch.stack([self.transform(image=)["image"] ]) / 255. 
-    #     return data

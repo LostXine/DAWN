@@ -1,11 +1,11 @@
 train:  
-  _target_: dawn.data.calvin.calvin.CalvinDataset
+  _target_: dawn.data.realworld.realworld.RealworldDataset
   data_path: data/realsense
   split: training 
-  num_frames: 3
+  num_frames: 2
 
 val:
-  _target_: dawn.data.calvin.calvin.CalvinDataset
+  _target_: dawn.data.realworld.realworld.RealworldDataset
   data_path: data/realsense
   split: validation
-  num_frames: 3
+  num_frames: 2
