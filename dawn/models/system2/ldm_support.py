@@ -76,7 +76,7 @@ class LatentMotionEstimation(nn.Module):
         # self.image_processor = CLIPImageProcessor.from_pretrained("openai/clip-vit-base-patch16")
         self.feature_extractor = AutoModel.from_pretrained("google/vit-base-patch16-224-in21k", add_pooling_layer=False)
         # self.feature_extractor = CLIPVisionModel.from_pretrained("openai/clip-vit-base-patch16")
-        self.mlp = nn.Linear(self.feature_extractor.config.hidden_size, condition_dim)
+        # self.mlp = nn.Linear(self.feature_extractor.config.hidden_size, condition_dim)
 
         # self.feature_extractor.requires_grad_(False)
         self.text_encoder.requires_grad_(False)

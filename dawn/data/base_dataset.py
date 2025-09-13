@@ -38,6 +38,7 @@ class BaseDataset(Dataset):
         cache_metadata=True,
         observation_type: List[str] = ["rgb_static", "rgb_gripper"],  # Default observation types
         observation_from: List[str] = None,
+        action_type: str = "actions",
         **kwargs
     ):
         timer = Timer()
@@ -50,7 +51,7 @@ class BaseDataset(Dataset):
         self.min_skip = min_skip
         self.max_skip = max_skip
         self.cache_metadata = cache_metadata
-
+        self.action_type = action_type
         self.split = split
 
         if not os.path.exists(self.data_path):
@@ -81,8 +82,6 @@ class BaseDataset(Dataset):
         ])
 
     def _load_metadata(self, episode):
-
-           
         if "metadata" not in episode:
             metadata = json.load(open(os.path.join(episode["path"], "metadata.json"), "r"))
         else:
@@ -93,14 +92,14 @@ class BaseDataset(Dataset):
             metadata["frames"] = metadata["frames"][:metadata["length"]]
             # metadata["length"] = len(metadata["frames"])
         
-        if "last_idx_same_gripper" not in metadata:
-            metadata["last_idx_same_gripper"] = [metadata["length"] - 1] * metadata["length"]
-            if "actions" in metadata:
-                for i in range(metadata["length"] - 2, -1, -1):
-                    if metadata["actions"][i][6] == metadata["actions"][i + 1][6]:
-                        metadata["last_idx_same_gripper"][i] = metadata["last_idx_same_gripper"][i + 1]
-                    else:
-                        metadata["last_idx_same_gripper"][i] = i
+        # if "last_idx_same_gripper" not in metadata:
+        #     metadata["last_idx_same_gripper"] = [metadata["length"] - 1] * metadata["length"]
+        #     if "actions" in metadata:
+        #         for i in range(metadata["length"] - 2, -1, -1):
+        #             if metadata["actions"][i][6] == metadata["actions"][i + 1][6]:
+        #                 metadata["last_idx_same_gripper"][i] = metadata["last_idx_same_gripper"][i + 1]
+        #             else:
+        #                 metadata["last_idx_same_gripper"][i] = i
                 # for i in range(metadata["length"]):
                 #     print(i, metadata["last_idx_same_gripper"][i], metadata["actions"][i][6], torch.tensor(metadata["rel_actions"][i])[:6].abs().mean(), metadata["rel_actions"][i])
                 # print("----------")
@@ -218,7 +217,7 @@ class BaseDataset(Dataset):
     def get_action(self, episode_metadata, frame_idx):
         metadata = episode_metadata
         # action = torch.tensor(metadata["rel_actions"][frame_idx: frame_idx + self.num_actions])
-        action = torch.tensor(metadata["actions"][frame_idx: frame_idx + self.num_actions])
+        action = torch.tensor(metadata[self.action_type][frame_idx: frame_idx + self.num_actions])
         
         return action
 
@@ -230,9 +229,9 @@ class BaseDataset(Dataset):
 
     def __getitem__(self, idx):
         # logger.info(f"Getting item {idx} from {self.split} split")
-        # episode = self.episodes[idx]
-        first_frame, episode = self.episodes[idx]
-        # first_frame = None
+        episode = self.episodes[idx]
+        # first_frame, episode = self.episodes[idx]
+        first_frame = None
         
         metadata = self._load_metadata(episode)
 

@@ -52,12 +52,13 @@ class ImagineToAct(torch.nn.Module):
             # if not self.training or random.random() < 0.5:
                 if split != "train" or gen_flow or random.random() < 0.0:
                     # print("?????")
+                    # flow = self.imagine_model.gen_flow(batch_data[self.input_type])[:, -1]
                     imagined_output = self.imagine_model(batch_data, **kwargs)
                     flow = imagined_output["generated_flow"]
                 else:
                     flow = self.imagine_model.gen_flow(batch_data[self.input_type])[:, -1]
                     # Add some noise to the flow to adapt with the generated flow 
-                    noise = torch.randn_like(flow) / self.imagine_model.image_size / 2
+                    noise = torch.randn_like(flow) / self.imagine_model.image_size / 4
                     p = torch.rand(flow.shape[0], device=flow.device) < 0.5
                     flow = flow + noise * p[:, None, None, None]  # Add noise only to some samples
                 
@@ -82,9 +83,14 @@ class ImagineToAct(torch.nn.Module):
 
             x = {
                 "visual_input": visual_input,
-                # "visual_input2": visual_input2,
                 "lang_goal": goal,
             }
+
+            if "robot_obs" in batch_data:
+                norm_robot_obs = batch_data["robot_obs"][:, 0] #Shape: (B, 8)
+                norm_robot_obs = norm_robot_obs.unsqueeze(1) #Shape: (B, 1, 8)
+                x["robot_pose"] = norm_robot_obs,
+
                 
             # print(imagined_output["feats"].shape)
             # visual_input = imagined_output["feats"]

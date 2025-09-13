@@ -92,7 +92,8 @@ class Trainer:
                         pass
             else:
                 logger.warning(f"Weights file {checkpoint_path} does not exist. Skipping loading weights.")
-        
+
+            self.model.load_weights()
             # Extract step number from the filename
             # if self.cfg.resume:
             #     self.cur_step = int(os.path.basename(checkpoint_path).split('_')[1].split('.')[0])

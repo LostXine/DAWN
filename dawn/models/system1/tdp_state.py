@@ -6,7 +6,7 @@ from tqdm import trange
 
 import math
 from dawn.models.modules.gc_sampling import *
-from dawn.models.modules.diffusion.diffusion_transformer import DiffusionTransformer
+from dawn.models.modules.diffusion.diffusion_transformer_state import DiffusionTransformer
 from dawn.models.system1.utils import *
 
 from typing import Optional, Tuple
