@@ -1,11 +1,11 @@
 train:  
   _target_: dawn.data.realworld.realworld.RealworldDataset
-  data_path: data/realsense1k
+  data_path: data/realsense-debug
   split: training 
   num_frames: 2
 
 val:
   _target_: dawn.data.realworld.realworld.RealworldDataset
-  data_path: data/realsense1k
+  data_path: data/realsense-debug
   split: validation
   num_frames: 2

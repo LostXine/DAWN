@@ -30,7 +30,7 @@ class RealworldDataset(BaseDataset):
         max_skip=30,
         cache_metadata=True,
         observation_type: List[str] = ["rgb_static", "rgb_gripper"],  # Default observation types,
-        action_type="rel_actions",
+        action_type="actions",
         **kwargs
     ):
         self.data_path = os.path.join(data_path, "episodes")
@@ -79,7 +79,7 @@ class RealworldDataset(BaseDataset):
 
         frame_idx = frames[-2]
         data["action"] = self.get_action(metadata, frame_idx)
-        data["robot_obs"] = self.get_robot_state(metadata, frame_idx)
+        # data["robot_obs"] = self.get_robot_state(metadata, frame_idx)
 
         # Pad actions if they are less than num_actions 
         if len(data["action"]) < self.num_actions:
@@ -110,7 +110,7 @@ class RealworldDataset(BaseDataset):
         if "metadata" in episode:
             return episode["metadata"]
         
-        metadata = json.load(open(os.path.join(episode["path"], "episode_metadata.json"), "r"))
+        metadata = json.load(open(os.path.join(episode["path"], "metadata.json"), "r"))
         if "frames" not in metadata:
             metadata["frames"] = sorted(os.listdir(os.path.join(episode["path"], self.observation_from[0])))
             metadata["length"] = len(metadata["frames"])
