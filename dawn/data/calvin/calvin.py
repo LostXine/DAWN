@@ -33,11 +33,12 @@ class CalvinDataset(BaseDataset):
         max_skip=30, #30,
         observation_type: List[str] = ["rgb_static", "rgb_gripper"],  # Default observation types
         action_type="rel_actions",
+        use_robot_obs=False,
         **kwargs
     ):
         # self.data_path = os.path.join(data_path, "episodes")
         self.data_path = os.path.join(data_path, split, "episodes")
-        
+        self.use_robot_obs = use_robot_obs
         # Load task + language annotations
         try:
             self.annos = OmegaConf.load(os.path.join(data_path, "annotations.yaml"))
@@ -50,7 +51,8 @@ class CalvinDataset(BaseDataset):
             logger.warning("No annotations found, using default language annotations.")
 
         super().__init__(data_path, split, image_size, num_frames, num_actions, min_skip, max_skip, observation_type, action_type=action_type)    
-        self.robot_obs_min, self.robot_obs_max, self.robot_obs_range = self._normalize_robot_state()
+        if use_robot_obs:
+            self.robot_obs_min, self.robot_obs_max, self.robot_obs_range = self._normalize_robot_state()
 
     def _normalize_robot_state(self):
         #normalize robot state by the global min and max
@@ -111,7 +113,6 @@ class CalvinDataset(BaseDataset):
 
         frame_idx = frames[-2]
         data["action"] = self.get_action(metadata, frame_idx)
-        data["robot_obs"] = self.get_robot_state(metadata, frame_idx)
 
         # Pad actions if they are less than num_actions 
         if len(data["action"]) < self.num_actions:
@@ -119,11 +120,12 @@ class CalvinDataset(BaseDataset):
             last_action = data["action"][-1:]
             data["action"] = torch.cat([data["action"], last_action.repeat(pad_length, 1)], dim=0)
         
-        # Pad actions if they are less than num_actions 
-        if len(data["robot_obs"]) < self.num_actions:
-            pad_length = self.num_actions - len(data["robot_obs"])
-            last_action = data["robot_obs"][-1:]
-            data["robot_obs"] = torch.cat([data["robot_obs"], last_action.repeat(pad_length, 1)], dim=0)
+        if self.use_robot_obs:
+            data["robot_obs"] = self.get_robot_state(metadata, frame_idx)
+            if len(data["robot_obs"]) < self.num_actions:
+                pad_length = self.num_actions - len(data["robot_obs"])
+                last_action = data["robot_obs"][-1:]
+                data["robot_obs"] = torch.cat([data["robot_obs"], last_action.repeat(pad_length, 1)], dim=0)
         
 
         skip = skips[-1]

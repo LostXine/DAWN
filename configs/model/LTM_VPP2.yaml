@@ -11,6 +11,7 @@ imagine_model:
       input_type: rgb_static
       support_types: ["rgb_gripper", ]
       use_text_sentence: False
+      flow_scale: 3
 
 action_model: 
       _target_: dawn.models.system1.tdp.TransformerDiffusionPolicy

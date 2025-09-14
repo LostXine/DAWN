@@ -264,16 +264,28 @@ def rollout(env, model, task_oracle, cfg, idx, subtask, lang_embeddings, val_ann
     # goal = lang_embeddings[subtask]
     # goal['lang_text'] = val_annotations[subtask][0]
 
-    
+    robot_state_min = torch.tensor([-0.4322, -0.4838,  0.2963, -3.1416, -0.7520, -3.1415, -0.0256, -2.4121,                                    
+                                          -0.8907,  1.1649, -3.0606, -2.1438,  1.0935, -1.8253, -1.0000])
+    robot_state_max = torch.tensor([ 0.4215,  0.1230,  0.7387,  3.1416,  0.6386,  3.1416,  0.0907,  0.3987,                         
+                                      1.6911,  2.8208, -0.4788,  0.5587,  2.7564,  2.7591,  1.0000])
+    robot_state_range = torch.tensor([0.8537, 0.6068, 0.4424, 6.2832, 1.3906, 6.2831, 0.1163, 2.8108, 2.5818,                       
+                                     1.6559, 2.5818, 2.7024, 1.6629, 4.5844, 2.0000]) 
+
     bar = progress.add_task(f"Rollout {idx}. {subtask}", total=cfg.inference.ep_len)
     total_time = 0
     for step in range(cfg.inference.ep_len):
+        robot_obs = torch.tensor(obs["robot_obs"])
+        robot_obs = (robot_obs - robot_state_min) / robot_state_range
+        # print(robot_obs[6:-1].view(1, -1).shape)
+        # exit(0)
         inputs = {
             "rgb_static": torch.cat(history["rgb_static"][-3:], dim=1),
             "rgb_gripper": torch.cat(history["rgb_gripper"][-3:], dim=1),
             "language": lang_annotation, 
-            "skip_frame": torch.tensor(10).view(-1).to(device)
+            "skip_frame": torch.tensor(10).view(-1).to(device),
+            "robot_obs": robot_obs[6:-1].view(1, 1, -1).to(device).float()
         }
+        # print(inputs["robot_obs"].dtype, inputs["rgb_gripper"].dtype)
         # action = torch.rand(7)
         # inputs = {
         #     "rgb_static": (transform(image=obs["rgb_obs"]["rgb_static"])["image"][None, None, ].to(device) / 255.).repeat(1, 3, 1, 1, 1),
@@ -414,7 +426,7 @@ def main(cfg):
         # model.imagine_model.vae = vae
         # model.imagine_model.vae.requires_grad_(False)
 
-    # model.load_weights()
+    model.load_weights()
     model = accelerator.prepare(model)
     model.eval()
 

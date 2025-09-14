@@ -3,21 +3,16 @@ train:
     _target_: dawn.data.calvin.calvin.CalvinDataset
     data_path: data/calvin/dataset_opt_local/task_ABC_D
     split: training 
-    num_frames: 3
+    num_frames: 2
     repeat: 5
   droid:
       _target_: dawn.data.droid.droid.DroidDataset
       data_path: data/droid_2/training
       split: training 
-      num_frames: 3
-  # ssv2:
-  #     _target_: dawn.data.ssv2.ssv2.SSv2Dataset
-  #     data_path: data/ssv2_2
-  #     split: training 
-  #     num_frames: 3
+      num_frames: 2
 
 val:
   _target_: dawn.data.calvin.calvin.CalvinDataset
   data_path: data/calvin/dataset_opt_local/task_ABC_D
   split: validation
-  num_frames: 3
+  num_frames: 2

@@ -41,6 +41,7 @@ class LatentMotionEstimation(nn.Module):
             input_type: str = "rgb_static", # Input type for the model, can be "rgb_static" or "rgb_gripper"
             support_types: list = ["rgb_gripper"], # Supported input types
             use_text_sentence: bool = False, # Whether to use text sentences for conditioning
+            flow_scale = 3,
             
         ):
         super().__init__()
@@ -93,7 +94,7 @@ class LatentMotionEstimation(nn.Module):
             self.interval_embed = nn.Embedding(31, condition_dim)
 
 
-        self.flow_scale = 3
+        self.flow_scale = flow_scale
 
         total_params = sum(p.numel() for p in self.parameters())
         total_trainable_params = sum(p.numel() for p in self.parameters() if p.requires_grad)

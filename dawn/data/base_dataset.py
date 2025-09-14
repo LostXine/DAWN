@@ -87,10 +87,10 @@ class BaseDataset(Dataset):
         else:
             metadata = episode["metadata"]
 
-        if "frames" not in metadata:
-            metadata["frames"] = sorted(os.listdir(os.path.join(episode["path"], self.observation_from[0])))
-            metadata["frames"] = metadata["frames"][:metadata["length"]]
-            # metadata["length"] = len(metadata["frames"])
+        # if "frames" not in metadata:
+        metadata["frames"] = sorted(os.listdir(os.path.join(episode["path"], self.observation_from[0])))
+        metadata["length"] = len(metadata["frames"])
+        # metadata["frames"] = metadata["frames"][:metadata["length"]]
         
         # if "last_idx_same_gripper" not in metadata:
         #     metadata["last_idx_same_gripper"] = [metadata["length"] - 1] * metadata["length"]

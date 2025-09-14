@@ -12,8 +12,8 @@ accelerator:
 
 seed: 0
 
-weights: ./outputs/DAWN_stage_2/2025-08-30_12-27/checkpoints/model_0100000.pth
-# ./outputs/DAWN_stage_2/2025-06-27_13-05-21/checkpoints/model_0002000.pth
+weights: ./outputs/DAWN_stage_2/2025-06-27_13-05-21/checkpoints/model_0002000.pth
+# ./outputs/DAWN_stage_2/2025-08-30_12-27/checkpoints/model_0100000.pth
 # ./outputs/DAWN_stage_2/2025-06-27_13-05-21/checkpoints/model_0002000.pth
 # ./outputs/DAWN_stage_2/2025-06-24_01-34-01/checkpoints/model_0100000.pth
 # ./outputs/DAWN_stage_2/2025-06-28_01-39-28/checkpoints/model_0007000.pth

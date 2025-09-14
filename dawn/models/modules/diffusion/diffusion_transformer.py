@@ -243,7 +243,7 @@ class DiffusionTransformer(nn.Module):
 
     def process_state_embeddings(self, states):
         states_global = self.tok_emb(states['state_images'])
-        if 'state_obs' in states:
+        if 'state_obs' in states and self.proprio_emb:
             proprio_embed = self.proprio_emb(states['state_obs'])
         else:
             proprio_embed = None
