@@ -99,7 +99,7 @@ class Trainer:
             #     self.cur_step = int(os.path.basename(checkpoint_path).split('_')[1].split('.')[0])
             #     logger.info(f"Resuming training from step {self.cur_step}")
 
-    def save_checkpoint(self, k=5):
+    def save_checkpoint(self, k=5, last=False):
         """
         Save the model and optimizer state to a checkpoint.
         Args:
@@ -114,7 +114,10 @@ class Trainer:
             os.remove(os.path.join(self.save_dir, ckpt_lst[0]))
             ckpt_lst = ckpt_lst[1:]
         
-        ckpt = os.path.join(self.save_dir, f"model_{self.cur_step:07d}.pth")
+        if not last:
+            ckpt = os.path.join(self.save_dir, f"model_{self.cur_step:07d}.pth")
+        else:
+            ckpt = os.path.join(self.save_dir, f"model_final.pth")
         torch.save(self.model.module.state_dict(), ckpt)
         logger.info(f"Saved checkpoint to {ckpt}")
         
@@ -191,9 +194,10 @@ class Trainer:
 
                 data_time = time.time()
 
+        self.save_checkpoint(last=True)
         self.validate(self.train_loader, split="train", num_steps=1)
         self.validate(self.val_loader, split="val")
-    
+                        
     def validate(self, val_loader, split="val", num_steps=-1):
         self.model.eval()
         if num_steps <= 0:
