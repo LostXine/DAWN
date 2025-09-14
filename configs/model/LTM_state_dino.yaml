@@ -1,4 +1,4 @@
-_target_: dawn.models.arch.LTM_latent.ImagineToAct
+_target_: dawn.models.arch.LTM_state.ImagineToAct
 # _target_: dawn.models.system1.raft.RAFT
 
 imagine_model: 
@@ -13,7 +13,7 @@ imagine_model:
       use_text_sentence: False
 
 action_model: 
-      _target_: dawn.models.system1.tdp_state.TransformerDiffusionPolicy
+      _target_: dawn.models.system1.tdp_state_dino.TransformerDiffusionPolicy
       # image_size: 256
       in_channels: 5
       obs_dim: 768

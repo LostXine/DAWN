@@ -133,7 +133,7 @@ class Trainer:
         while self.cur_step < self.cfg.total_steps:
             for batch in self.train_loader:
                 losses["data_time"].append(time.time() - data_time)
-
+                
                 # Forward pass
                 outputs = {}
                 with self.accelerator.accumulate(self.model):

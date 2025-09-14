@@ -64,19 +64,20 @@ class ImagineToAct(torch.nn.Module):
                 
                 norm_flow = flow * 2 - 1 
 
-            norm_rgb = batch_data[self.input_type][:, 0]
-            visual_input = torch.cat([
-                norm_rgb,
-                norm_flow
-            ], dim=1)
+            # norm_rgb = batch_data[self.input_type][:, 0]
+            # visual_input = torch.cat([
+            #     norm_rgb,
+            #     norm_flow
+            # ], dim=1)
 
-            visual_input2 = torch.cat([
-                batch_data["rgb_gripper"][:, 0], 
-                torch.zeros_like(norm_flow, device=norm_flow.device)
-            ], dim=1)
-
+            # visual_input2 = torch.cat([
+            #     batch_data["rgb_gripper"][:, 0], 
+            #     torch.zeros_like(norm_flow, device=norm_flow.device)
+            # ], dim=1)
+            
+            visual_input = torch.cat([batch_data[self.input_type][:, -2], batch_data["rgb_gripper"][:, -2]])
             # visual_input2 = self.imagine_model.encode_image(batch_data["rgb_gripper"][:, 0])
-            visual_input = torch.cat([visual_input, visual_input2], dim=0)
+            # visual_input = torch.cat([visual_input, visual_input2], dim=0)
             # goal = self.imagine_model.encode_text(batch_data["language"], use_sentence=True)
             # logger.info(batch_data["language"])
             goal = self.imagine_model.encode_text(batch_data["language"])
@@ -84,6 +85,7 @@ class ImagineToAct(torch.nn.Module):
             x = {
                 "visual_input": visual_input,
                 "lang_goal": goal,
+                "flow": norm_flow
             }
 
             if "robot_obs" in batch_data:
