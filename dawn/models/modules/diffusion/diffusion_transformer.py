@@ -138,12 +138,12 @@ class DiffusionTransformer(nn.Module):
         )
 
         self.latent_encoder_emb = None
-        self.proprio_emb = nn.Sequential(
-            nn.Linear(proprio_dim, embed_dim * 2),
-            nn.Mish(),
-            nn.Linear(embed_dim * 2, embed_dim),
-        )
-        # self.proprio_emb = None
+        # self.proprio_emb = nn.Sequential(
+        #     nn.Linear(proprio_dim, embed_dim * 2),
+        #     nn.Mish(),
+        #     nn.Linear(embed_dim * 2, embed_dim),
+        # )
+        self.proprio_emb = None
 
         self.block_size = block_size
         self.goal_seq_len = goal_seq_len
@@ -226,6 +226,8 @@ class DiffusionTransformer(nn.Module):
         return emb_t
 
     def preprocess_goals(self, goals, states_length, uncond=False):
+        if goals is None:
+            return goals
         if len(goals.shape) == 2:
             goals = einops.rearrange(goals, 'b d -> b 1 d')
         if goals.shape[1] == states_length and self.goal_seq_len == 1:
@@ -242,12 +244,14 @@ class DiffusionTransformer(nn.Module):
     def process_state_embeddings(self, states):
         states_global = self.tok_emb(states['state_images'])
         if 'state_obs' in states:
-            proprio_embed = self.proprio_emb(states['state_obs']) 
+            proprio_embed = self.proprio_emb(states['state_obs'])
         else:
             proprio_embed = None
         return states_global, proprio_embed
 
     def process_goal_embeddings(self, goals):
+        if goals is None:
+            return None
         goal_embed = self.lang_emb(goals)
         return goal_embed
 
@@ -263,7 +267,7 @@ class DiffusionTransformer(nn.Module):
     def concatenate_inputs(self, emb_t, goal_x, state_x, proprio_x, uncond=False):
         input_seq_components = [state_x]
 
-        if self.goal_conditioned:
+        if self.goal_conditioned or goal_x is not None:
             input_seq_components.insert(0, goal_x)
 
         if proprio_x is not None:
@@ -271,15 +275,7 @@ class DiffusionTransformer(nn.Module):
         #else:
         #    if not self.goal_conditioned:
         #        input_seq_components.append(self.drop(goal_x))
-        
-        #print shape of each input component
-        # for i, comp in enumerate(input_seq_components):
-        #     if i == 0:
-        #         logger.info(f"goal_x shape: {comp.shape}")
-        #     elif i == 1:
-        #         logger.info(f"state_x shape: {comp.shape}")
-        #     elif i == 2:
-        #         logger.info(f"proprio_x shape: {comp.shape}")
+
         input_seq = torch.cat(input_seq_components, dim=1)
         return input_seq
 

@@ -126,12 +126,12 @@ class BaseDataset(Dataset):
         # metadata["length"] = len(obs_files)
         # episode["metadata"] = metadata
         
-        return episode
         # for obs_type, obs_from in zip(self.observation_type, self.observation_from):
         #     frames = [os.path.join(episode_path, obs_from, x) for x in metadata["frames"]]
         #     # This is the slow part that now runs in parallel for each episode
         #     images = np.stack([self.read_image(obs_file) for obs_file in frames], axis=0)
         #     episode[obs_type] = images
+        return episode
 
 
     def _load_episodes(self, num_workers=8): # Adjust num_workers as needed
