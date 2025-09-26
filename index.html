@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>LangToMo</title>
+  <title>DAWN</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="icon" type="image/png" href="favicon.png" sizes="32x32">
   <style>
@@ -220,6 +220,21 @@
       margin: 0 1.5rem; /* Increased horizontal spacing */
       flex-shrink: 0; /* Prevent arrow from shrinking */
     }
+
+    .video-grid-one {
+      display: grid;
+      grid-template-columns: repeat(1, 1fr); /* 4 per row */
+      gap: 10px;
+      padding: 10px;
+    }
+
+    .video-grid-one img,
+    .video-grid-one video {
+      width: 100%;
+      height: auto;
+      border-radius: 8px;
+      object-fit: cover;
+    }
     
     @media (max-width: 768px) {
       .demo-container {
@@ -260,9 +275,9 @@
       <div class="authors">
         <div>
             <a href="https://eronguyen.me" target="_blank">E-Ro Nguyen</a>,
-            <a href="" target="_blank">Yichi Zhang</a>,
-            <a href="https://scholar.google.com/citations?user=K2WBZTwAAAAJ&hl=en" target="_blank">Kanchana Ranasinghe</a>,
-            <a href="https://scholar.google.com/citations?user=qkyC7KQAAAAJ&hl=en" target="_blank">Xiang Li</a>,
+            <a href="https://scholar.google.com/citations?user=HOCyXzsAAAAJ&hl" target="_blank">Yichi Zhang</a>,
+            <a href="https://kahnchana.github.io/" target="_blank">Kanchana Ranasinghe</a>,
+            <a href="https://xxli.me/" target="_blank">Xiang Li</a>,
             <a href="http://michaelryoo.com" target="_blank">Michael S Ryoo</a>
         </div>
         <div class="institution">Stony Brook University</div>
@@ -284,5 +299,284 @@
         </a>       
       </div>
       
+      <div class="teaser-figure">
+        <img src="media/teaser.png" alt="DAWN Framework" style="max-width: 100%; height: auto; border-radius: 8px;">
+      </div>
+      
+      <div class="abstract">
+        <h2>Abstract</h2>
+        <p>We present <b>DAWN</b> (<b>D</b>iffusion is <b>A</b>ll <b>W</b>e <b>N</b>eed for robot control), a unified
+          diffusion-based framework for language-conditioned robotic manipulation that
+          bridges high-level <em>motion intent</em> and low-level <em>robot action</em> via structured
+          pixel motion representation. In DAWN, both the high-level and low-level
+          controllers are modeled as diffusion processes, yielding a fully trainable,
+          end-to-end system with interpretable intermediate motion abstractions. DAWN
+          achieves state-of-the-art results on the challenging CALVIN benchmark,
+          demonstrating strong multi-task performance, and further validates its
+          effectiveness on MetaWorld. Despite the substantial domain gap between
+          simulation and reality and limited real-world data, we demonstrate reliable
+          real-world transfer with only minimal finetuning, illustrating the practical
+          viability of diffusion-based motion abstractions for robotic control. Our
+          results show the effectiveness of combining diffusion modeling with
+          motion-centric representations as a strong baseline for scalable and robust
+          robot learning.
+        </p>
+      </div>
+
+      <!-- Demonstrations Content (Full Width) -->
+  <div style="width: 100%; background: white; padding: 2rem 0 4rem;">
+
+    <div style="max-width: 1200px; margin: 4rem auto; padding: 0 1rem;">
+      <h2 style="color: #4A90E2; font-size: 1.8rem">Demonstrations</h2>
+    </div>
+
+    <!-- Meta World Benchmark Section -->
+    <div style="max-width: 1400px; margin: 4rem auto 0; padding: 0 2rem;">
+      <h3 style="color: #4A90E2; margin: 0 0 1.5rem; text-align: center; font-size: 1.5rem;">Bimanual Manipulation</h3>
+      
+      <div style="display: flex; flex-direction: column; gap: 3rem; max-width: 1200px; margin: 0 auto; padding: 0 1rem;">
+        <!-- Demo 1 -->
+        <div style="background: #fff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.08);">
+          <div style="padding: 1.2rem; text-align: center; background: #f8f9ff; border-bottom: 1px solid #e0e6ff;">
+            <p style="margin: 0; color: #4A90E2; font-weight: 500;">Task Goal: <code style="background: #f5f5f5; padding: 0.2em 0.5em; border-radius: 4px; font-family: 'Courier New', monospace; color: #333; border: 1px solid #e0e0e0;">clean the cutting board</code></p>
+          </div>
+          <div style="padding: 1.5rem;">
+            <div class="video-grid-one" id="videoHeader">
+              <video src="media/galexea/1.webm" autoplay loop muted></video>
+            </div>
+            
+          </div>
+        </div>
+
+        <!-- Demo 1 -->
+        <div style="background: #fff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.08);">
+          <div style="padding: 1.2rem; text-align: center; background: #f8f9ff; border-bottom: 1px solid #e0e6ff;">
+            <p style="margin: 0; color: #4A90E2; font-weight: 500;">Task Goal: <code style="background: #f5f5f5; padding: 0.2em 0.5em; border-radius: 4px; font-family: 'Courier New', monospace; color: #333; border: 1px solid #e0e0e0;">fold clothes</code></p>
+          </div>
+          <div style="padding: 1.5rem;">
+            <div class="video-grid-one" id="videoHeader">
+              <video src="media/galexea/3.webm" autoplay loop muted></video>
+            </div>
+            
+          </div>
+        </div>
+
+
+
+
+      </div>
+    </div>    
+
+    <div style="max-width: 1400px; margin: 4rem auto 0; padding: 0 2rem;">
+      <h3 style="color: #4A90E2; margin: 0 0 1.5rem; text-align: center; font-size: 1.5rem;">Real World Demonstrations</h3>
+    <p style="text-align: center; color: #666; margin-bottom: 2rem; max-width: 800px; margin-left: auto; margin-right: auto;">
+      See DAWN in action with real-world robotic applications and scenarios.
+    </p>
+      
+      <style>
+        @media (min-width: 768px) {
+          .demo-horizontal-arrow {
+            display: flex !important;
+          }
+          .demo-arrow {
+            display: none !important;
+          }
+          .demo-item {
+            margin: 0 !important;
+          }
+        }
+      </style>
+      <div style="display: flex; flex-direction: column; gap: 3rem; max-width: 1200px; margin: 0 auto; padding: 0 1rem;">
+        <!-- Demo 1 -->
+        <div style="background: #fff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.08);">
+          <div style="padding: 1.2rem; text-align: center; background: #f8f9ff; border-bottom: 1px solid #e0e6ff;">
+            <p style="margin: 0; color: #4A90E2; font-weight: 500;">Task Goal: <code style="background: #f5f5f5; padding: 0.2em 0.5em; border-radius: 4px; font-family: 'Courier New', monospace; color: #333; border: 1px solid #e0e0e0;">Lift a grape from the table</code></p>
+          </div>
+          <div style="padding: 1.5rem;">
+            <div class="demo-row" style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 2rem; width: 100%;">
+              <!-- Input Video -->
+                          
+              <div class="demo-item" style="flex: 1; min-width: 300px; max-width: 45%; text-align: center; display: flex; flex-direction: column; height: 400px; margin: 1rem 0;">
+                <p style="margin: 0 0 0.5rem; font-weight: 500; color: #555;">Video</p>
+                <div style="flex: 1; display: flex; align-items: center; justify-content: center; overflow: hidden;">
+                  <video src="media/rw/lift_grape_3.webm" autoplay loop muted></video>
+        
+                </div>
+              </div>
+
+              <!-- Predicted Pixel Motions -->
+              <div class="demo-item" style="flex: 1; min-width: 300px; max-width: 45%; text-align: center; display: flex; flex-direction: column; height: 400px; margin: 1rem 0;">
+                <p style="margin: 0 0 0.5rem; font-weight: 500; color: #555;">Predicted Pixel Motion</p>
+                <div style="flex: 1; display: flex; align-items: center; justify-content: center; overflow: hidden;">
+                  <video src="media/rw/lift_grape_3.webm" autoplay loop muted></video>
+        
+                </div>
+              </div>
+
+            </div>
+          </div>
+        </div>
+
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 3rem; max-width: 1200px; margin: 0 auto; padding: 0 1rem;">
+        <!-- Demo 1 -->
+        <div style="background: #fff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.08);">
+          <div style="padding: 1.2rem; text-align: center; background: #f8f9ff; border-bottom: 1px solid #e0e6ff;">
+            <p style="margin: 0; color: #4A90E2; font-weight: 500;">Task Goal: <code style="background: #f5f5f5; padding: 0.2em 0.5em; border-radius: 4px; font-family: 'Courier New', monospace; color: #333; border: 1px solid #e0e0e0;">Lift a kiwi from the table</code></p>
+          </div>
+          <div style="padding: 1.5rem;">
+            <div class="demo-row" style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 2rem; width: 100%;">
+              <!-- Input Video -->
+                          
+              <div class="demo-item" style="flex: 1; min-width: 300px; max-width: 45%; text-align: center; display: flex; flex-direction: column; height: 400px; margin: 1rem 0;">
+                <p style="margin: 0 0 0.5rem; font-weight: 500; color: #555;">Video</p>
+                <div style="flex: 1; display: flex; align-items: center; justify-content: center; overflow: hidden;">
+                  <video src="media/rw/lift_kiwi_3.webm" autoplay loop muted></video>
+        
+                </div>
+              </div>
+
+              <!-- Predicted Pixel Motions -->
+              <div class="demo-item" style="flex: 1; min-width: 300px; max-width: 45%; text-align: center; display: flex; flex-direction: column; height: 400px; margin: 1rem 0;">
+                <p style="margin: 0 0 0.5rem; font-weight: 500; color: #555;">Predicted Pixel Motion</p>
+                <div style="flex: 1; display: flex; align-items: center; justify-content: center; overflow: hidden;">
+                  <video src="media/rw/lift_kiwi_3.webm" autoplay loop muted></video>
+        
+                </div>
+              </div>
+
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 3rem; max-width: 1200px; margin: 0 auto; padding: 0 1rem;">
+        <!-- Demo 1 -->
+        <div style="background: #fff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.08);">
+          <div style="padding: 1.2rem; text-align: center; background: #f8f9ff; border-bottom: 1px solid #e0e6ff;">
+            <p style="margin: 0; color: #4A90E2; font-weight: 500;">Task Goal: <code style="background: #f5f5f5; padding: 0.2em 0.5em; border-radius: 4px; font-family: 'Courier New', monospace; color: #333; border: 1px solid #e0e0e0;">Lift an orange from the table</code></p>
+          </div>
+          <div style="padding: 1.5rem;">
+            <div class="demo-row" style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 2rem; width: 100%;">
+              <!-- Input Video -->
+                          
+              <div class="demo-item" style="flex: 1; min-width: 300px; max-width: 45%; text-align: center; display: flex; flex-direction: column; height: 400px; margin: 1rem 0;">
+                <p style="margin: 0 0 0.5rem; font-weight: 500; color: #555;">Video</p>
+                <div style="flex: 1; display: flex; align-items: center; justify-content: center; overflow: hidden;">
+                  <video src="media/rw/lift_orange_3.webm" autoplay loop muted></video>
+        
+                </div>
+              </div>
+
+              <!-- Predicted Pixel Motions -->
+              <div class="demo-item" style="flex: 1; min-width: 300px; max-width: 45%; text-align: center; display: flex; flex-direction: column; height: 400px; margin: 1rem 0;">
+                <p style="margin: 0 0 0.5rem; font-weight: 500; color: #555;">Predicted Pixel Motion</p>
+                <div style="flex: 1; display: flex; align-items: center; justify-content: center; overflow: hidden;">
+                  <video src="media/rw/lift_orange_3.webm" autoplay loop muted></video>
+        
+                </div>
+              </div>
+
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <div style="max-width: 1400px; margin: 4rem auto 0; padding: 0 2rem;">
+      <h3 style="color: #4A90E2; margin: 0 0 1.5rem; text-align: center; font-size: 1.5rem;">CALVIN Demonstrations</h3>
+    <p style="text-align: center; color: #666; margin-bottom: 2rem; max-width: 800px; margin-left: auto; margin-right: auto;">
+      See DAWN in action with CALVIN Benchmark.
+    </p>
+      
+      <style>
+        @media (min-width: 768px) {
+          .demo-horizontal-arrow {
+            display: flex !important;
+          }
+          .demo-arrow {
+            display: none !important;
+          }
+          .demo-item {
+            margin: 0 !important;
+          }
+        }
+      </style>
+      <div style="display: flex; flex-direction: column; gap: 3rem; max-width: 1200px; margin: 0 auto; padding: 0 1rem;">
+        <!-- Demo 1 -->
+        <div style="background: #fff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.08);">
+          <div style="padding: 1.2rem; text-align: center; background: #f8f9ff; border-bottom: 1px solid #e0e6ff;">
+            <p style="margin: 0; color: #4A90E2; font-weight: 500;">Task Goal: <code style="background: #f5f5f5; padding: 0.2em 0.5em; border-radius: 4px; font-family: 'Courier New', monospace; color: #333; border: 1px solid #e0e0e0;">1 -> 2 -> 3 -> 4 -> 5</code></p>
+          </div>
+          <div style="padding: 1.5rem;">
+            <div style="display: flex; flex-wrap: wrap; gap: 1rem; justify-content: center;">
+
+              <!-- Original Video -->
+              <div class="demo-item" style="flex: 1; min-width: 300px; max-width: 45%; text-align: center; display: flex; flex-direction: column; height: auto;">
+                <p style="margin: 0 0 0.5rem; font-weight: 500; color: #555;">Video</p>
+                <div style="flex: 1; display: flex; align-items: center; justify-content: center; overflow: hidden;">
+                  <video src="media/calvin_webm/0.webm" autoplay loop muted style="width: 100%; height: 100%; object-fit: cover;"></video>
+                </div>
+              </div>
+            
+              <!-- Predicted Pixel Motion -->
+              <div class="demo-item" style="flex: 1; min-width: 300px; max-width: 45%; text-align: center; display: flex; flex-direction: column; height: auto;">
+                <p style="margin: 0 0 0.5rem; font-weight: 500; color: #555;">Predicted Pixel Motion</p>
+                <div style="flex: 1; display: flex; align-items: center; justify-content: center; overflow: hidden;">
+                  <video src="media/calvin_flow_webm/0.webm" autoplay loop muted style="width: 100%; height: 100%; object-fit: cover;"></video>
+                </div>
+              </div>
+            
+            </div>
+            
+
+            </div>
+          </div>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 3rem; max-width: 1200px; margin: 0 auto; padding: 0 1rem;">
+          <!-- Demo 1 -->
+          <div style="background: #fff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.08);">
+            <div style="padding: 1.2rem; text-align: center; background: #f8f9ff; border-bottom: 1px solid #e0e6ff;">
+              <p style="margin: 0; color: #4A90E2; font-weight: 500;">Task Goal: <code style="background: #f5f5f5; padding: 0.2em 0.5em; border-radius: 4px; font-family: 'Courier New', monospace; color: #333; border: 1px solid #e0e0e0;">1 -> 2 -> 3 -> 4 -> 5</code></p>
+            </div>
+            <div style="padding: 1.5rem;">
+              <div style="display: flex; flex-wrap: wrap; gap: 1rem; justify-content: center;">
+  
+                <!-- Original Video -->
+                <div class="demo-item" style="flex: 1; min-width: 300px; max-width: 45%; text-align: center; display: flex; flex-direction: column; height: auto;">
+                  <p style="margin: 0 0 0.5rem; font-weight: 500; color: #555;">Video</p>
+                  <div style="flex: 1; display: flex; align-items: center; justify-content: center; overflow: hidden;">
+                    <video src="media/calvin_webm/1.webm" autoplay loop muted style="width: 100%; height: 100%; object-fit: cover;"></video>
+                  </div>
+                </div>
+              
+                <!-- Predicted Pixel Motion -->
+                <div class="demo-item" style="flex: 1; min-width: 300px; max-width: 45%; text-align: center; display: flex; flex-direction: column; height: auto;">
+                  <p style="margin: 0 0 0.5rem; font-weight: 500; color: #555;">Predicted Pixel Motion</p>
+                  <div style="flex: 1; display: flex; align-items: center; justify-content: center; overflow: hidden;">
+                    <video src="media/calvin_flow_webm/1.webm" autoplay loop muted style="width: 100%; height: 100%; object-fit: cover;"></video>
+                  </div>
+                </div>
+              
+              </div>
+              
+  
+              </div>
+            </div>
+          </div>
+  
+
+    
+  <div style="max-width: 1200px; margin: 0 auto; padding: 0 1rem;">
+    <div style="text-align: center; margin: 3rem 0 4rem;">
+    <a href="videos.html" style="display: inline-block; background-color: #4A90E2; color: white; padding: 16px 40px; border-radius: 50px; text-decoration: none; font-weight: 600; font-size: 1.2rem; transition: all 0.3s ease; box-shadow: 0 4px 12px rgba(74, 144, 226, 0.3);">
+      View More Demonstrations
+    </a>
+  </div>
+  </div>
+
 </body>
 </html>
