@@ -1,9 +1,0 @@
-train:  
-  _target_: dawn.data.droid.droid.DroidDataset
-  data_path: data/droid_100_3
-  split: training 
-
-val:
-  _target_: dawn.data.droid.droid.DroidDataset
-  data_path: data/droid_100_3
-  split: validation

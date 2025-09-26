@@ -1,9 +1,0 @@
-train:  
-  _target_: dawn.data.calvin.calvin.CalvinDataset
-  data_path: data/calvin/dataset_opt_local/calvin_debug_dataset
-  split: training 
-
-val:
-  _target_: dawn.data.calvin.calvin.CalvinDataset
-  data_path: data/calvin/dataset_opt_local/calvin_debug_dataset
-  split: validation
